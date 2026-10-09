@@ -71,6 +71,12 @@ def build_model():
     model = models.Sequential(
         [
             layers.Input(shape=(IMG_SIZE, IMG_SIZE, 3)),
+            # Augmentation layers are only active during model.fit() (training=True).
+            # Keras automatically disables them for predict()/evaluate(), so the exact
+            # same saved model is used for inference in the Flask app with no changes.
+            layers.RandomRotation(0.02),
+            layers.RandomZoom(0.05),
+            layers.RandomBrightness(0.05, value_range=(0, 255)),
             layers.Rescaling(1.0 / 255),
             layers.Conv2D(32, 3, activation="relu", padding="same"),
             layers.MaxPooling2D(),
@@ -177,7 +183,7 @@ def main():
     model.summary()
 
     early_stop = callbacks.EarlyStopping(
-        monitor="val_accuracy", patience=4, restore_best_weights=True
+        monitor="val_accuracy", patience=8, restore_best_weights=True
     )
     checkpoint = callbacks.ModelCheckpoint(
         os.path.join(MODEL_DIR, "brain_tumor_cnn.keras"),
@@ -189,7 +195,7 @@ def main():
         x_train,
         y_train,
         validation_data=(x_val, y_val),
-        epochs=20,
+        epochs=35,
         batch_size=32,
         callbacks=[early_stop, checkpoint],
         verbose=2,

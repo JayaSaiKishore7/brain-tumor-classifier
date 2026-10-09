@@ -8,7 +8,7 @@ and lets you upload an MRI image for a live prediction.
 > **Educational project only — not a diagnostic tool.** Do not use this for real medical
 > decisions. See [Limitations](#limitations--disclaimer).
 
-**Test accuracy: 95.83%** on a held-out set of 1,054 images.
+**Test accuracy: 97.15%** on a held-out set of 1,054 images.
 
 ![Confusion matrix](web/static/results/confusion_matrix.png)
 
@@ -57,6 +57,10 @@ progressively extract and downsample features, followed by a dense classificatio
 ```
 Input            128 x 128 x 3  (RGB MRI slice)
   │
+RandomRotation   ±0.02 turns (~±7°)        \
+RandomZoom       ±5%                        > training only — identity at inference
+RandomBrightness ±5%                       /
+  │
 Rescaling        scales pixel values from [0, 255] to [0, 1]
   │
 Conv2D  32 filters, 3x3, ReLU, same padding
@@ -85,13 +89,18 @@ Dense   4, Softmax                       →  P(glioma), P(meningioma), P(notumo
 - **`same` padding** keeps the conv layers from shrinking the feature map on their own,
   so `MaxPooling2D` is the only thing changing resolution — makes the shape math easy to
   reason about.
-- **`Rescaling` as the first layer** (rather than normalizing the numpy arrays before
-  training) means the saved model accepts raw `0–255` uint8 images directly — the exact
-  same preprocessing path is used during training and in the Flask `/predict` endpoint, so
-  there's no risk of train/serve skew.
+- **Augmentation layers (`RandomRotation`/`RandomZoom`/`RandomBrightness`), kept deliberately
+  mild** — see [Results](#results) for why. They're real Keras layers inside the model
+  (not a separate preprocessing step), so Keras automatically disables them outside of
+  `model.fit()` — the exact same saved model does inference with no augmentation applied,
+  no special-casing needed in the Flask app.
+- **`Rescaling` as the first non-augmentation layer** (rather than normalizing the numpy
+  arrays before training) means the saved model accepts raw `0–255` uint8 images directly
+  — the exact same preprocessing path is used during training and in the Flask `/predict`
+  endpoint, so there's no risk of train/serve skew.
 - **Dropout(0.5)** before the final layer, because 4,916 training images is a modest
   dataset for a CNN trained from scratch (no pretrained weights) — the model memorizes
-  the training set quickly (99% train accuracy by epoch 20) if not regularized.
+  the training set quickly if not regularized.
 - **1.29M parameters total** — small enough to train in well under half an hour on a
   CPU, no GPU required.
 
@@ -103,11 +112,12 @@ Total params: **1,290,052** (4.92 MB).
 |---|---|
 | Framework | TensorFlow / Keras |
 | Image size | 128 × 128, RGB |
+| Augmentation | ±7° rotation, ±5% zoom, ±5% brightness (training only) |
 | Batch size | 32 |
 | Optimizer | Adam |
 | Loss | sparse categorical crossentropy |
-| Max epochs | 20 |
-| Early stopping | monitors `val_accuracy`, patience 4, restores best weights |
+| Max epochs | 35 |
+| Early stopping | monitors `val_accuracy`, patience 8, restores best weights |
 | Checkpointing | best `val_accuracy` epoch saved to disk after every improvement |
 
 Early stopping and checkpointing both matter here in practice, not just as best
@@ -117,23 +127,40 @@ model so far is never lost.
 
 ## Results
 
-Ran the full 20 epochs (validation accuracy kept finding new highs late, so early
-stopping's patience of 4 was never exhausted). Best epoch (19) restored automatically.
-
-**Test set: 1,054 images, 95.83% accuracy, 0.159 loss.**
+**Test set: 1,054 images, 97.15% accuracy, 0.149 loss.** Ran 32 of 35 max epochs before
+early stopping (patience 8) ended it; best epoch restored automatically.
 
 | Class | Precision | Recall | F1 | Support |
 |---|---|---|---|---|
-| glioma | 98.3% | 93.0% | 95.6% | 243 |
-| meningioma | 90.2% | 93.1% | 91.6% | 247 |
-| notumor | 98.7% | 98.3% | 98.5% | 300 |
-| pituitary | 95.9% | 98.1% | 97.0% | 264 |
+| glioma | 99.1% | 95.1% | 97.1% | 243 |
+| meningioma | 94.3% | 94.3% | 94.3% | 247 |
+| notumor | 98.0% | 99.3% | 98.7% | 300 |
+| pituitary | 97.0% | 99.2% | 98.1% | 264 |
 
-Meningioma is the weakest class — the confusion matrix shows most of the model's errors
-are glioma images misclassified as meningioma (17 of them) and meningioma images
-misclassified as pituitary (10 of them). This tracks with the literature: meningioma is
-the most visually variable of the three tumor types on MRI, so it's the hardest class to
-separate cleanly even for this kind of model.
+Meningioma is still the weakest class (same as before augmentation), but every single
+class improved — this wasn't a trade-off against the other three.
+
+### The augmentation tuning story
+
+Adding augmentation wasn't a straightforward win on the first try, and it's worth
+documenting why, since "add augmentation" doesn't automatically mean "model gets better":
+
+| Attempt | Rotation / Zoom / Brightness | Patience / max epochs | Test accuracy | Meningioma F1 |
+|---|---|---|---|---|
+| Baseline (no augmentation) | — | 4 / 20 | 95.83% | 91.6% |
+| v1 | ±18° / ±10% / ±15% | 4 / 20 | 92.50% | 85.0% |
+| v2 (same augmentation, more patience) | ±18° / ±10% / ±15% | 8 / 35 | 92.50% | 85.0% |
+| **v3 (gentler augmentation)** | **±7° / ±5% / ±5%** | **8 / 35** | **97.15%** | **94.3%** |
+
+v1 made things *worse*. The first instinct was "it just needs more time to converge
+under the harder augmented training signal," so v2 reran with double the patience and
+nearly double the epoch budget — and converged to the exact same result, which ruled
+that theory out. The actual issue was the augmentation strength itself: rotation/zoom/
+brightness are usually nuisance variation in natural photos, but MRI orientation and
+intensity carry real diagnostic signal, and meningiomas in particular are often small,
+peripheral masses — a ±18° rotation or ±10% zoom can distort or crop the exact region
+the model needs most for the hardest class. Turning all three down to roughly a third of
+their original strength (v3) is what actually helped.
 
 ![Training curves](web/static/results/training_history.png)
 
@@ -195,7 +222,7 @@ mkdir -p data
 curl -L -o data/brain_tumor.parquet \
   https://huggingface.co/datasets/Hemg/Brain-Tumor-MRI-Dataset/resolve/main/data/train-00000-of-00001.parquet
 
-# 2. Train (takes ~10-15 min on CPU; outputs go to model/ and web/static/results/)
+# 2. Train (takes ~15-20 min on CPU; outputs go to model/ and web/static/results/)
 python src/train.py
 
 # 3. Run the site
@@ -218,7 +245,6 @@ python app.py
 
 ## Possible improvements
 
-- Data augmentation (rotation, zoom, brightness) to improve meningioma generalization
 - Transfer learning from a pretrained backbone (e.g. EfficientNet, ResNet)
 - Grad-CAM visualization to show which region of the MRI drove each prediction
 - k-fold cross-validation instead of a single train/val/test split
