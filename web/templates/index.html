@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Results — Brain Tumor MRI Classifier{% endblock %}
+{% block content %}
+
+<h1>brain tumor MRI classifier</h1>
+<p class="sub">
+  A basic CNN trained from scratch to classify brain MRI scans into glioma, meningioma,
+  pituitary tumor, or no tumor.
+</p>
+
+{% if not metrics %}
+  <div class="panel">
+    <p class="pending">Training is still running — this page will fill in with real metrics once it's done. Refresh in a bit.</p>
+  </div>
+{% else %}
+
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="label">Test accuracy</div>
+      <div class="value">{{ (metrics.test_accuracy * 100) | round(2) }}%</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Test loss</div>
+      <div class="value">{{ metrics.test_loss }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Epochs run</div>
+      <div class="value">{{ metrics.epochs_run }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Train / val / test</div>
+      <div class="value" style="font-size:1.1rem">{{ metrics.train_size }} / {{ metrics.val_size }} / {{ metrics.test_size }}</div>
+    </div>
+  </div>
+
+  <div class="two-col">
+    <div class="panel">
+      <h2>Training curves</h2>
+      {% if has_history %}
+        <img src="{{ url_for('static', filename='results/training_history.png') }}" alt="Training accuracy and loss curves" />
+      {% endif %}
+    </div>
+    <div class="panel">
+      <h2>Confusion matrix</h2>
+      {% if has_confusion %}
+        <img src="{{ url_for('static', filename='results/confusion_matrix.png') }}" alt="Confusion matrix" />
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Per-class performance</h2>
+    <table>
+      <thead>
+        <tr><th>Class</th><th>Precision</th><th>Recall</th><th>F1</th><th>Support</th></tr>
+      </thead>
+      <tbody>
+        {% for cls in metrics.class_names %}
+          {% set row = metrics.classification_report[cls] %}
+          <tr>
+            <td>{{ cls }}</td>
+            <td>{{ (row.precision * 100) | round(1) }}%</td>
+            <td>{{ (row.recall * 100) | round(1) }}%</td>
+            <td>{{ (row['f1-score'] * 100) | round(1) }}%</td>
+            <td>{{ row.support | int }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>Sample test predictions</h2>
+    <div class="sample-grid">
+      {% for s in samples %}
+        <div class="sample-card {{ 'correct' if s.correct else 'wrong' }}">
+          <img src="{{ url_for('static', filename='results/samples/' + s.file) }}" alt="MRI sample" />
+          <div class="sample-meta">
+            <div class="pred">{{ s.predicted }}</div>
+            <div>actual: {{ s.actual }} &middot; {{ (s.confidence * 100) | round(1) }}%</div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+{% endif %}
+
+<p class="disclaimer">
+  Educational project only — not a diagnostic tool. Trained on a public research dataset
+  (combined Figshare / SARTAJ / Br35H sources), not validated for clinical use.
+</p>
+
+{% endblock %}

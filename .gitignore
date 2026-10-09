@@ -1,0 +1,19 @@
+# Dataset (148MB, exceeds GitHub's 100MB file limit — download it yourself, see README)
+data/*.parquet
+
+# User-uploaded images from the live /predict feature (runtime, not source)
+web/static/uploads/*
+!web/static/uploads/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+train_log.txt

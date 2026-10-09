@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Try it — Brain Tumor MRI Classifier{% endblock %}
+{% block content %}
+
+<h1>try it on your own MRI scan</h1>
+<p class="sub">Upload a brain MRI image (JPG/PNG) and the model will classify it.</p>
+
+{% if error %}
+  <div class="error-box">{{ error }}</div>
+{% endif %}
+
+<form class="upload-box" method="post" enctype="multipart/form-data">
+  <p>Drop an MRI slice here, or choose a file.</p>
+  <input type="file" name="image" accept="image/*" required />
+  <br />
+  <button type="submit">classify</button>
+</form>
+
+{% if result %}
+  <div class="panel" style="margin-top: 2rem;">
+    <div class="result-box">
+      <img src="{{ url_for('static', filename='uploads/' + uploaded_file) }}" alt="Uploaded MRI scan" />
+      <div>
+        <div class="predicted-label {{ 'notumor' if result.label == 'notumor' else '' }}">
+          {{ result.label }}
+        </div>
+        <p class="sub" style="margin-bottom: 1.2rem;">{{ result.confidence }}% confidence</p>
+
+        {% for name, pct in result.breakdown %}
+          <div class="bar-row">
+            <span>{{ name }}</span>
+            <span class="bar-track"><span class="bar-fill" style="width: {{ pct }}%"></span></span>
+            <span>{{ pct }}%</span>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+<p class="disclaimer">
+  Educational project only — not a diagnostic tool. Do not use this for real medical decisions.
+</p>
+
+{% endblock %}

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Brain Tumor MRI Classifier{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a href="/" class="brand">brain<span>MRI</span>.</a>
+      <nav>
+        <a href="/" class="{{ 'active' if request.path == '/' else '' }}">results</a>
+        <a href="/predict" class="{{ 'active' if request.path == '/predict' else '' }}">try it</a>
+      </nav>
+    </div>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    basic CNN &middot; trained on the Brain Tumor MRI Dataset (glioma / meningioma / pituitary / no tumor)
+  </footer>
+</body>
+</html>

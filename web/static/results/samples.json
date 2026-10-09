@@ -1,0 +1,86 @@
+[
+  {
+    "file": "sample_00.jpg",
+    "actual": "glioma",
+    "predicted": "glioma",
+    "confidence": 1.0,
+    "correct": true
+  },
+  {
+    "file": "sample_01.jpg",
+    "actual": "meningioma",
+    "predicted": "meningioma",
+    "confidence": 1.0,
+    "correct": true
+  },
+  {
+    "file": "sample_02.jpg",
+    "actual": "meningioma",
+    "predicted": "glioma",
+    "confidence": 0.7819,
+    "correct": false
+  },
+  {
+    "file": "sample_03.jpg",
+    "actual": "glioma",
+    "predicted": "glioma",
+    "confidence": 0.971,
+    "correct": true
+  },
+  {
+    "file": "sample_04.jpg",
+    "actual": "meningioma",
+    "predicted": "meningioma",
+    "confidence": 0.9987,
+    "correct": true
+  },
+  {
+    "file": "sample_05.jpg",
+    "actual": "notumor",
+    "predicted": "notumor",
+    "confidence": 1.0,
+    "correct": true
+  },
+  {
+    "file": "sample_06.jpg",
+    "actual": "glioma",
+    "predicted": "glioma",
+    "confidence": 1.0,
+    "correct": true
+  },
+  {
+    "file": "sample_07.jpg",
+    "actual": "notumor",
+    "predicted": "notumor",
+    "confidence": 1.0,
+    "correct": true
+  },
+  {
+    "file": "sample_08.jpg",
+    "actual": "pituitary",
+    "predicted": "pituitary",
+    "confidence": 1.0,
+    "correct": true
+  },
+  {
+    "file": "sample_09.jpg",
+    "actual": "glioma",
+    "predicted": "glioma",
+    "confidence": 0.9932,
+    "correct": true
+  },
+  {
+    "file": "sample_10.jpg",
+    "actual": "notumor",
+    "predicted": "notumor",
+    "confidence": 1.0,
+    "correct": true
+  },
+  {
+    "file": "sample_11.jpg",
+    "actual": "pituitary",
+    "predicted": "pituitary",
+    "confidence": 1.0,
+    "correct": true
+  }
+]
