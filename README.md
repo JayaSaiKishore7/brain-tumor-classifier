@@ -32,7 +32,7 @@ and lets you upload an MRI image for a live prediction.
 
 [`Hemg/Brain-Tumor-MRI-Dataset`](https://huggingface.co/datasets/Hemg/Brain-Tumor-MRI-Dataset)
 on Hugging Face — a combination of the **Figshare**, **SARTAJ**, and **Br35H** brain MRI
-datasets, repackaged as a single Parquet file. No account or API key required to download it.
+datasets, repackaged as a single Parquet files. No account or API key required to download it.
 
 | | |
 |---|---|
