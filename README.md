@@ -8,7 +8,7 @@ and lets you upload an MRI image for a live prediction.
 > **Educational project only — not a diagnostic tool.** Do not use this for real medical
 > decisions. See [Limitations](#limitations--disclaimer).
 
-**Test accuracy: 97.15%** on a held-out set of 1,054 images.
+**Test accuracy: 97.53%** on a held-out set of 1,054 images.
 
 ![Confusion matrix](web/static/results/confusion_matrix.png)
 
@@ -127,18 +127,18 @@ model so far is never lost.
 
 ## Results
 
-**Test set: 1,054 images, 97.15% accuracy, 0.149 loss.** Ran 32 of 35 max epochs before
-early stopping (patience 8) ended it; best epoch restored automatically.
+**Test set: 1,054 images, 97.53% accuracy, 0.085 loss.** Ran the full 35 epochs; the
+best validation epoch (27, 96.4% val accuracy) was restored automatically at the end.
 
 | Class | Precision | Recall | F1 | Support |
 |---|---|---|---|---|
-| glioma | 99.1% | 95.1% | 97.1% | 243 |
-| meningioma | 94.3% | 94.3% | 94.3% | 247 |
-| notumor | 98.0% | 99.3% | 98.7% | 300 |
-| pituitary | 97.0% | 99.2% | 98.1% | 264 |
+| glioma | 98.3% | 95.5% | 96.9% | 243 |
+| meningioma | 95.2% | 96.0% | 95.6% | 247 |
+| notumor | 98.4% | 100.0% | 99.2% | 300 |
+| pituitary | 98.1% | 98.1% | 98.1% | 264 |
 
-Meningioma is still the weakest class (same as before augmentation), but every single
-class improved — this wasn't a trade-off against the other three.
+Meningioma is still the weakest class (as it was before augmentation), and the most common
+error is a glioma predicted as meningioma (9 of 243 gliomas).
 
 ### The augmentation tuning story
 
@@ -150,7 +150,8 @@ documenting why, since "add augmentation" doesn't automatically mean "model gets
 | Baseline (no augmentation) | — | 4 / 20 | 95.83% | 91.6% |
 | v1 | ±18° / ±10% / ±15% | 4 / 20 | 92.50% | 85.0% |
 | v2 (same augmentation, more patience) | ±18° / ±10% / ±15% | 8 / 35 | 92.50% | 85.0% |
-| **v3 (gentler augmentation)** | **±7° / ±5% / ±5%** | **8 / 35** | **97.15%** | **94.3%** |
+| v3 (gentler augmentation) | ±7° / ±5% / ±5% | 8 / 35 | 97.15% | 94.3% |
+| **v3 retrain (same config, current model)** | **±7° / ±5% / ±5%** | **8 / 35** | **97.53%** | **95.6%** |
 
 v1 made things *worse*. The first instinct was "it just needs more time to converge
 under the harder augmented training signal," so v2 reran with double the patience and
@@ -161,6 +162,11 @@ intensity carry real diagnostic signal, and meningiomas in particular are often 
 peripheral masses — a ±18° rotation or ±10% zoom can distort or crop the exact region
 the model needs most for the hardest class. Turning all three down to roughly a third of
 their original strength (v3) is what actually helped.
+
+The v3 retrain uses the identical model and augmentation settings, rerun after a code
+cleanup (no change to the architecture, data split or hyperparameters). The ~0.4-point
+difference from the first v3 run is ordinary run-to-run variation in CNN training on CPU,
+not an improvement from any change — worth keeping in mind when comparing single runs.
 
 ![Training curves](web/static/results/training_history.png)
 
