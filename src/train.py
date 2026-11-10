@@ -20,8 +20,13 @@ import json
 import os
 import random
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 from PIL import Image
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
@@ -36,7 +41,6 @@ RESULTS_DIR = os.path.join(ROOT, "web", "static", "results")
 SAMPLES_DIR = os.path.join(RESULTS_DIR, "samples")
 
 IMG_SIZE = 128
-CLASS_NAMES = ["glioma", "meningioma", "notumor", "pituitary"]
 SEED = 42
 
 os.makedirs(MODEL_DIR, exist_ok=True)
@@ -46,6 +50,16 @@ os.makedirs(SAMPLES_DIR, exist_ok=True)
 random.seed(SEED)
 np.random.seed(SEED)
 tf.random.set_seed(SEED)
+
+
+def read_class_names():
+    """Label index -> class name, read from the dataset's own Hugging Face metadata.
+
+    This is the single source of truth for class names: it's written to
+    model/class_names.json, which is what the Flask app reads.
+    """
+    meta = pq.read_schema(DATA_PATH).metadata[b"huggingface"]
+    return json.loads(meta)["info"]["features"]["label"]["names"]
 
 
 def load_dataset():
@@ -67,7 +81,7 @@ def load_dataset():
     return images, labels
 
 
-def build_model():
+def build_model(num_classes):
     model = models.Sequential(
         [
             layers.Input(shape=(IMG_SIZE, IMG_SIZE, 3)),
@@ -89,7 +103,7 @@ def build_model():
             layers.Flatten(),
             layers.Dense(128, activation="relu"),
             layers.Dropout(0.5),
-            layers.Dense(len(CLASS_NAMES), activation="softmax"),
+            layers.Dense(num_classes, activation="softmax"),
         ]
     )
     model.compile(
@@ -101,11 +115,6 @@ def build_model():
 
 
 def save_training_history(history):
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
     axes[0].plot(history.history["accuracy"], label="train")
     axes[0].plot(history.history["val_accuracy"], label="val")
@@ -124,23 +133,19 @@ def save_training_history(history):
     plt.close(fig)
 
 
-def save_confusion_matrix(y_true, y_pred):
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    cm = confusion_matrix(y_true, y_pred)
+def save_confusion_matrix(y_true, y_pred, class_names):
+    n = len(class_names)
+    cm = confusion_matrix(y_true, y_pred, labels=range(n))
     fig, ax = plt.subplots(figsize=(5, 4.5))
     im = ax.imshow(cm, cmap="Oranges")
-    ax.set_xticks(range(len(CLASS_NAMES)))
-    ax.set_yticks(range(len(CLASS_NAMES)))
-    ax.set_xticklabels(CLASS_NAMES, rotation=45, ha="right")
-    ax.set_yticklabels(CLASS_NAMES)
+    ax.set_xticks(range(n))
+    ax.set_yticks(range(n))
+    ax.set_xticklabels(class_names, rotation=45, ha="right")
+    ax.set_yticklabels(class_names)
     ax.set_xlabel("predicted")
     ax.set_ylabel("actual")
-    for i in range(len(CLASS_NAMES)):
-        for j in range(len(CLASS_NAMES)):
+    for i in range(n):
+        for j in range(n):
             ax.text(j, i, cm[i, j], ha="center", va="center", fontsize=9)
     fig.colorbar(im)
     fig.tight_layout()
@@ -149,7 +154,12 @@ def save_confusion_matrix(y_true, y_pred):
     return cm
 
 
-def save_sample_predictions(x_test, y_true, y_pred, probs, n=12):
+def save_sample_predictions(x_test, y_true, y_pred, probs, class_names, n=12):
+    # Remove images from previous runs so a smaller n doesn't leave stale files behind.
+    for old in os.listdir(SAMPLES_DIR):
+        if old.startswith("sample_") and old.endswith(".jpg"):
+            os.remove(os.path.join(SAMPLES_DIR, old))
+
     idx = np.random.choice(len(x_test), size=n, replace=False)
     samples = []
     for rank, i in enumerate(idx):
@@ -158,8 +168,8 @@ def save_sample_predictions(x_test, y_true, y_pred, probs, n=12):
         samples.append(
             {
                 "file": fname,
-                "actual": CLASS_NAMES[int(y_true[i])],
-                "predicted": CLASS_NAMES[int(y_pred[i])],
+                "actual": class_names[int(y_true[i])],
+                "predicted": class_names[int(y_pred[i])],
                 "confidence": round(float(np.max(probs[i])), 4),
                 "correct": bool(y_true[i] == y_pred[i]),
             }
@@ -169,7 +179,11 @@ def save_sample_predictions(x_test, y_true, y_pred, probs, n=12):
 
 
 def main():
+    class_names = read_class_names()
+    print(f"Classes: {class_names}")
     images, labels = load_dataset()
+    if labels.min() < 0 or labels.max() >= len(class_names):
+        raise ValueError("Dataset labels don't match the class names in its metadata.")
 
     x_train, x_temp, y_train, y_temp = train_test_split(
         images, labels, test_size=0.3, stratify=labels, random_state=SEED
@@ -179,7 +193,7 @@ def main():
     )
     print(f"train={len(x_train)} val={len(x_val)} test={len(x_test)}")
 
-    model = build_model()
+    model = build_model(len(class_names))
     model.summary()
 
     early_stop = callbacks.EarlyStopping(
@@ -203,17 +217,26 @@ def main():
 
     save_training_history(history)
 
-    probs = model.predict(x_test, batch_size=32)
+    # One forward pass over the test set; accuracy and loss are derived from these
+    # probabilities instead of running a second pass with model.evaluate().
+    probs = model.predict(x_test, batch_size=32, verbose=0)
     y_pred = np.argmax(probs, axis=1)
 
-    test_loss, test_acc = model.evaluate(x_test, y_test, verbose=0)
+    test_acc = float(np.mean(y_pred == y_test))
+    test_loss = float(
+        np.mean(tf.keras.losses.sparse_categorical_crossentropy(y_test, probs))
+    )
     print(f"Test accuracy: {test_acc:.4f}")
 
     report = classification_report(
-        y_test, y_pred, target_names=CLASS_NAMES, output_dict=True
+        y_test,
+        y_pred,
+        labels=range(len(class_names)),
+        target_names=class_names,
+        output_dict=True,
     )
-    cm = save_confusion_matrix(y_test, y_pred)
-    save_sample_predictions(x_test, y_test, y_pred, probs)
+    cm = save_confusion_matrix(y_test, y_pred, class_names)
+    save_sample_predictions(x_test, y_test, y_pred, probs, class_names)
 
     metrics = {
         "test_accuracy": round(float(test_acc), 4),
@@ -224,13 +247,13 @@ def main():
         "epochs_run": len(history.history["loss"]),
         "classification_report": report,
         "confusion_matrix": cm.tolist(),
-        "class_names": CLASS_NAMES,
+        "class_names": class_names,
     }
     with open(os.path.join(MODEL_DIR, "metrics.json"), "w") as f:
         json.dump(metrics, f, indent=2)
 
     with open(os.path.join(MODEL_DIR, "class_names.json"), "w") as f:
-        json.dump(CLASS_NAMES, f, indent=2)
+        json.dump(class_names, f, indent=2)
 
     model.save(os.path.join(MODEL_DIR, "brain_tumor_cnn.keras"))
     print("Done. Model + metrics + plots saved.")

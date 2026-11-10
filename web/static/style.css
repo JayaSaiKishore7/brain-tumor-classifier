@@ -1,6 +1,11 @@
 :root {
   --bg: #0b1016;
   --surface: #121923;
+  --surface-sunken: #0d141d;
+  --track: #1a2433;
+  --topbar-bg: rgba(11, 16, 22, 0.9);
+  --on-accent: #06131f;
+  --bad-tint: rgba(255, 107, 107, 0.1);
   --border: #223049;
   --text: #e8edf4;
   --muted: #8b99ae;
@@ -32,7 +37,7 @@ header.topbar {
   padding: 1.1rem 0;
   position: sticky;
   top: 0;
-  background: rgba(11, 16, 22, 0.9);
+  background: var(--topbar-bg);
   backdrop-filter: blur(8px);
   z-index: 10;
 }
@@ -109,6 +114,10 @@ p.sub {
   font-weight: 700;
 }
 
+.stat-card .value-sm {
+  font-size: 1.1rem;
+}
+
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -168,7 +177,7 @@ th {
 }
 
 .sample-card {
-  background: #0d141d;
+  background: var(--surface-sunken);
   border: 1px solid var(--border);
   border-radius: 0.7rem;
   overflow: hidden;
@@ -212,7 +221,7 @@ input[type="file"] {
 
 button {
   background: var(--accent);
-  color: #06131f;
+  color: var(--on-accent);
   border: none;
   border-radius: 999px;
   padding: 0.7rem 1.8rem;
@@ -227,12 +236,20 @@ button:hover {
 }
 
 .error-box {
-  background: rgba(255, 107, 107, 0.1);
+  background: var(--bad-tint);
   border: 1px solid var(--bad);
   color: var(--bad);
   padding: 0.9rem 1.2rem;
   border-radius: 0.6rem;
   margin-bottom: 1.5rem;
+}
+
+.result-panel {
+  margin-top: 2rem;
+}
+
+p.sub.confidence {
+  margin-bottom: 1.2rem;
 }
 
 .result-box {
@@ -278,7 +295,7 @@ button:hover {
 }
 
 .bar-track {
-  background: #1a2433;
+  background: var(--track);
   border-radius: 999px;
   height: 8px;
   overflow: hidden;

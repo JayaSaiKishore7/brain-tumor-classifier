@@ -10,7 +10,11 @@
 
 {% if not metrics %}
   <div class="panel">
-    <p class="pending">Training is still running — this page will fill in with real metrics once it's done. Refresh in a bit.</p>
+    {% if has_model %}
+      <p class="pending">A model checkpoint exists but no final metrics yet, so training is probably still running. Refresh once it finishes.</p>
+    {% else %}
+      <p class="pending">No trained model yet. Run <code>python src/train.py</code> and this page will fill in with the results.</p>
+    {% endif %}
   </div>
 {% else %}
 
@@ -29,7 +33,7 @@
     </div>
     <div class="stat-card">
       <div class="label">Train / val / test</div>
-      <div class="value" style="font-size:1.1rem">{{ metrics.train_size }} / {{ metrics.val_size }} / {{ metrics.test_size }}</div>
+      <div class="value value-sm">{{ metrics.train_size }} / {{ metrics.val_size }} / {{ metrics.test_size }}</div>
     </div>
   </div>
 
@@ -38,12 +42,16 @@
       <h2>Training curves</h2>
       {% if has_history %}
         <img src="{{ url_for('static', filename='results/training_history.png') }}" alt="Training accuracy and loss curves" />
+      {% else %}
+        <p class="pending">training_history.png not found. Re-run src/train.py to generate it.</p>
       {% endif %}
     </div>
     <div class="panel">
       <h2>Confusion matrix</h2>
       {% if has_confusion %}
         <img src="{{ url_for('static', filename='results/confusion_matrix.png') }}" alt="Confusion matrix" />
+      {% else %}
+        <p class="pending">confusion_matrix.png not found. Re-run src/train.py to generate it.</p>
       {% endif %}
     </div>
   </div>
@@ -71,6 +79,9 @@
 
   <div class="panel">
     <h2>Sample test predictions</h2>
+    {% if not samples %}
+      <p class="pending">No sample predictions found. Re-run src/train.py to generate them.</p>
+    {% endif %}
     <div class="sample-grid">
       {% for s in samples %}
         <div class="sample-card {{ 'correct' if s.correct else 'wrong' }}">

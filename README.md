@@ -41,7 +41,7 @@ datasets, repackaged as a single Parquet files. No account or API key required t
 | Format | single Parquet file, `image` (JPEG bytes) + `label` (int 0–3) columns |
 | Size | ~155 MB |
 
-The raw dataset isn't committed to this repo (148MB — over GitHub's 100MB file limit, and
+The raw dataset isn't committed to this repo (~155 MB — over GitHub's 100MB file limit, and
 it's a third-party dataset rather than project source). `src/train.py` expects it at
 `data/brain_tumor.parquet` — see [Running it yourself](#running-it-yourself) for the
 download command.
@@ -176,12 +176,20 @@ A small Flask app (`web/app.py`) with two routes:
 - **`/predict`** — accepts an uploaded image, runs it through the *exact* same
   preprocessing as training (resize to 128×128, RGB, let the model's own `Rescaling`
   layer handle normalization), and renders the predicted class plus a confidence
-  breakdown across all four classes. The trained model is loaded lazily on first request
-  and cached in memory afterward.
+  breakdown across all four classes. Uploads are never written to disk — the preview is
+  sent back inline in the page, so nothing accumulates on the server. Files over 8 MB get
+  a friendly error.
+
+The trained model and class names are loaded lazily on first request and cached in
+memory. The cache is keyed on file modification time, so after a retrain the next request
+picks up the new model automatically — no server restart needed.
+
+Class names have a single source: `src/train.py` reads them from the dataset's own label
+metadata and writes `model/class_names.json`, which is what the app uses.
 
 Both routes degrade gracefully if `src/train.py` hasn't been run yet — the dashboard
-shows a "still training" message instead of erroring, and `/predict` tells you the model
-isn't ready rather than crashing.
+explains that no model exists (or that training looks in progress) instead of erroring,
+and `/predict` tells you the model isn't ready rather than crashing.
 
 ## Project structure
 
@@ -203,8 +211,7 @@ brain-tumor-classifier/
 │   │   └── predict.html          # upload + live prediction
 │   └── static/
 │       ├── style.css
-│       ├── results/              # plots + sample predictions (written by train.py)
-│       └── uploads/              # live /predict uploads (gitignored)
+│       └── results/              # plots + sample predictions (written by train.py)
 ├── requirements.txt
 └── README.md
 ```
@@ -212,7 +219,8 @@ brain-tumor-classifier/
 ## Running it yourself
 
 Requires Python 3.10+ and the packages in `requirements.txt` (TensorFlow, scikit-learn,
-pandas, pyarrow, Pillow, matplotlib, Flask).
+pandas, pyarrow, Pillow, matplotlib, Flask). The committed model was saved with Keras
+3.15.1 and won't load on older Keras versions, hence the `keras>=3.15.1` pin.
 
 ```bash
 pip install -r requirements.txt
@@ -230,6 +238,9 @@ cd web
 python app.py
 # -> http://localhost:5500
 ```
+
+The Flask debugger is off by default because it allows running arbitrary code from the
+browser. For local development only, set `FLASK_DEBUG=1` before `python app.py`.
 
 ## Limitations & disclaimer
 

@@ -1,4 +1,7 @@
-tensorflow
+tensorflow>=2.16
+# model/brain_tumor_cnn.keras was saved with Keras 3.15.1; older Keras 3 releases
+# fail to deserialize it (GlorotUniform "input_axes" error), so pin the floor.
+keras>=3.15.1
 numpy
 pandas
 pyarrow

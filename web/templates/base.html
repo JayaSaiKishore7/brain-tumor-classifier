@@ -9,10 +9,10 @@
 <body>
   <header class="topbar">
     <div class="container">
-      <a href="/" class="brand">brain<span>MRI</span>.</a>
+      <a href="{{ url_for('index') }}" class="brand">brain<span>MRI</span>.</a>
       <nav>
-        <a href="/" class="{{ 'active' if request.path == '/' else '' }}">results</a>
-        <a href="/predict" class="{{ 'active' if request.path == '/predict' else '' }}">try it</a>
+        <a href="{{ url_for('index') }}" class="{{ 'active' if request.endpoint == 'index' else '' }}">results</a>
+        <a href="{{ url_for('predict') }}" class="{{ 'active' if request.endpoint == 'predict' else '' }}">try it</a>
       </nav>
     </div>
   </header>
