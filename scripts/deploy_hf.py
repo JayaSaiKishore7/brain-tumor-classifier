@@ -70,6 +70,18 @@ def main():
     from huggingface_hub import CommitOperationAdd, CommitOperationDelete, HfApi
 
     api = HfApi()
+
+    # Preflight: ZeroGPU only works with Gradio Spaces, and a ZeroGPU Space can't be
+    # moved to free CPU hardware without PRO. Fail before uploading, not after.
+    runtime = api.space_info(SPACE_ID).runtime
+    hardware = (runtime.requested_hardware or runtime.hardware or "") if runtime else ""
+    print(f"Space hardware: {hardware or 'unknown'}")
+    if hardware.startswith("zero"):
+        sys.exit(
+            f"Space is on ZeroGPU ({hardware}), which only runs Gradio apps; this is a "
+            "Docker app. Recreate the Space with SDK=Docker and CPU basic hardware."
+        )
+
     files = collect_files()
     existing = set(api.list_repo_files(SPACE_ID, repo_type="space"))
     stale = sorted(existing - set(files) - KEEP_IN_SPACE)
