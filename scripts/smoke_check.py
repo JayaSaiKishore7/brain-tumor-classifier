@@ -1,38 +1,49 @@
 """
-Post-deploy smoke check: exercises the real user journey against a running site.
+Post-deploy smoke check for the static site on Hugging Face.
 
-    python scripts/smoke_check.py                              # the Hugging Face Space
-    python scripts/smoke_check.py http://127.0.0.1:7860        # any other deployment
+    python scripts/smoke_check.py              # the Space (URL looked up via the HF API)
+    python scripts/smoke_check.py <site-url>   # any other copy, e.g. a local preview
 
-1. waits (up to --timeout seconds) for /healthz to return 200 (Space build + model load)
-2. loads the results dashboard
-3. uploads a known sample MRI and checks a prediction comes back
+Waits (up to --timeout seconds) for the site to come up, then checks that the dashboard
+shows this commit's accuracy, and that the prediction page and every file it needs (the
+ONNX model, the JavaScript, the stylesheet) are served, with the model byte-identical to
+the local one. Exit code 0 = healthy; non-zero = broken, roll back.
 
-Exit code 0 = healthy; non-zero = the deployment is broken and should be rolled back.
-Standard library only, so it runs anywhere.
+The prediction itself runs in the visitor's browser, so it can't be exercised from here:
+open the "try it" page and classify one image after each deploy (about 10 seconds).
+Standard library only.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import sys
 import time
 import urllib.error
 import urllib.request
-import uuid
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_URL = "https://jayasaikishore-brain-tumor-classifier.hf.space"
-SAMPLES = os.path.join(ROOT, "web", "static", "results")
+SPACE_ID = os.environ.get("HF_SPACE_ID", "JayaSaiKishore/brain-tumor-classifier")
+HEADERS = {"User-Agent": "brain-tumor-classifier-smoke-check"}
 
 
-def fetch(url, data=None, headers=None, timeout=60):
-    req = urllib.request.Request(url, data=data, headers=headers or {})
+def fetch(url, timeout=60):
+    req = urllib.request.Request(url, headers=HEADERS)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, r.read().decode("utf-8", "replace")
+            return r.status, r.read()
     except urllib.error.HTTPError as e:
-        return e.code, e.read().decode("utf-8", "replace")
+        return e.code, e.read()
+
+
+def space_url():
+    status, body = fetch(f"https://huggingface.co/api/spaces/{SPACE_ID}")
+    if status != 200:
+        sys.exit(f"Couldn't look up Space {SPACE_ID}: HTTP {status}")
+    info = json.loads(body)
+    host = info.get("host") or f"https://{info['subdomain']}.static.hf.space"
+    return host if host.startswith("http") else f"https://{host}"
 
 
 def check(name, ok, detail=""):
@@ -43,50 +54,43 @@ def check(name, ok, detail=""):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("url", nargs="?", default=DEFAULT_URL)
-    parser.add_argument("--timeout", type=int, default=900, help="seconds to wait for /healthz")
+    parser.add_argument("url", nargs="?")
+    parser.add_argument("--timeout", type=int, default=300, help="seconds to wait for the site")
     args = parser.parse_args()
-    base = args.url.rstrip("/")
+    base = (args.url or space_url()).rstrip("/")
+    print("Checking", base)
 
     start = time.time()
-    status = None
+    status, body = None, b""
     while time.time() - start < args.timeout:
         try:
-            status, _ = fetch(base + "/healthz", timeout=15)
+            status, body = fetch(base + "/index.html", timeout=15)
         except (urllib.error.URLError, TimeoutError, ConnectionError):
             status = None
         if status == 200:
             break
         time.sleep(10)
-    check("healthz", status == 200, f"status {status} after {time.time() - start:.0f}s")
+    check("site up", status == 200, f"status {status} after {time.time() - start:.0f}s")
 
-    status, body = fetch(base + "/")
-    check("dashboard", status == 200 and "accuracy" in body.lower(), f"status {status}")
+    with open(os.path.join(ROOT, "model", "metrics.json")) as f:
+        accuracy = f"{json.load(f)['test_accuracy'] * 100:.2f}%"
+    check("dashboard shows this model", accuracy.encode() in body, f"expected {accuracy}")
 
-    with open(os.path.join(SAMPLES, "samples.json")) as f:
-        sample = json.load(f)[0]
-    with open(os.path.join(SAMPLES, "samples", sample["file"]), "rb") as f:
-        image = f.read()
-    boundary = uuid.uuid4().hex
-    payload = (
-        (
-            f'--{boundary}\r\nContent-Disposition: form-data; name="image"; '
-            f'filename="{sample["file"]}"\r\nContent-Type: image/jpeg\r\n\r\n'
-        ).encode()
-        + image
-        + f"\r\n--{boundary}--\r\n".encode()
-    )
-    status, body = fetch(
-        base + "/predict",
-        data=payload,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-    )
-    check(
-        "prediction",
-        status == 200 and "data:image/jpeg;base64," in body and sample["predicted"] in body,
-        f"status {status}, expected '{sample['predicted']}' in result",
-    )
+    status, body = fetch(base + "/predict.html")
+    check("prediction page", status == 200 and b"onnxruntime-web@" in body, f"status {status}")
+
+    for path in ("static/style.css", "static/js/predict.js", "static/js/preprocess.js"):
+        status, _ = fetch(f"{base}/{path}")
+        check(path, status == 200, f"status {status}")
+
+    with open(os.path.join(ROOT, "model", "brain_tumor_cnn.onnx"), "rb") as f:
+        local = hashlib.sha256(f.read()).hexdigest()
+    status, body = fetch(base + "/model/brain_tumor_cnn.onnx", timeout=120)
+    remote = hashlib.sha256(body).hexdigest() if status == 200 else None
+    check("model served, matches local", remote == local, f"status {status}")
+
     print("Smoke check passed:", base)
+    print(f"Now open {base}/predict.html and classify one image.")
 
 
 if __name__ == "__main__":

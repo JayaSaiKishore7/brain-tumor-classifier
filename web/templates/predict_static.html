@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Try it — Brain Tumor MRI Classifier{% endblock %}
+{% block content %}
+
+{#- Static-site version of predict.html: the model runs in the visitor's browser
+    (ONNX Runtime Web), so there is no server and the image never leaves the device.
+    Built into a static page by scripts/build_static.py. -#}
+
+<h1>try it on your own MRI scan</h1>
+<p class="sub">
+  Upload a brain MRI image (JPG/PNG) and the model will classify it. The model runs in
+  your browser: your image is never uploaded anywhere.
+</p>
+
+<div class="error-box" id="error" hidden></div>
+
+<form class="upload-box" id="form">
+  <p id="status">Loading the model…</p>
+  <input type="file" id="file" accept="image/*" required />
+  <br />
+  <button type="submit" id="submit" disabled>classify</button>
+</form>
+
+<div class="panel result-panel" id="result" hidden>
+  <div class="result-box">
+    <img id="preview" alt="Uploaded MRI scan" />
+    <div>
+      <div class="predicted-label" id="label"></div>
+      <p class="sub confidence" id="confidence"></p>
+      <div id="breakdown"></div>
+    </div>
+  </div>
+</div>
+
+<p class="disclaimer">
+  Educational project only — not a diagnostic tool. Do not use this for real medical decisions.
+</p>
+
+<script
+  src="https://cdn.jsdelivr.net/npm/onnxruntime-web@{{ ort_version }}/dist/ort.wasm.min.js"
+  integrity="{{ ort_integrity }}"
+  crossorigin="anonymous"
+></script>
+<script id="config" type="application/json">
+  {{ {"classNames": class_names, "imgSize": img_size, "maxUploadMb": max_upload_mb,
+      "modelUrl": "model/brain_tumor_cnn.onnx",
+      "wasmPath": "https://cdn.jsdelivr.net/npm/onnxruntime-web@" ~ ort_version ~ "/dist/"} | tojson }}
+</script>
+<script type="module" src="static/js/predict.js"></script>
+
+{% endblock %}

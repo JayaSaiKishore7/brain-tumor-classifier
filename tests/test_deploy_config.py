@@ -1,5 +1,5 @@
-"""Deployment config checks: catch Space/Docker misconfiguration locally, before
-Hugging Face rejects a deploy or builds a container that can't be reached."""
+"""Deployment config checks: catch Space misconfiguration locally, before Hugging Face
+rejects a deploy or serves a broken Space."""
 
 import os
 import re
@@ -21,15 +21,9 @@ def space_metadata():
 
 def test_space_metadata_valid():
     meta = space_metadata()
-    assert meta["sdk"] == "docker"
-    # Hugging Face rejects the whole upload if this is over 60 characters.
+    # Static Spaces are the free tier; Docker/Gradio need PRO on free accounts.
+    assert meta["sdk"] == "static"
+    assert meta["app_file"] == "index.html"
+    # Hugging Face rejects the whole upload if these are over 60 characters.
     assert len(meta["short_description"]) <= 60
     assert len(meta["title"]) <= 60
-
-
-def test_space_port_matches_dockerfile():
-    with open(os.path.join(ROOT, "Dockerfile"), encoding="utf-8") as f:
-        dockerfile = f.read()
-    port = space_metadata()["app_port"]
-    assert f"PORT={port}" in dockerfile
-    assert f"EXPOSE {port}" in dockerfile

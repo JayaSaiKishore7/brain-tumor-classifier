@@ -1,0 +1,9 @@
+# Environment for scripts/export_onnx.py only (Keras -> ONNX). Kept separate from
+# requirements.txt so tf2onnx's dependencies never touch the training/serving stack.
+tensorflow==2.21.0
+keras==3.15.1
+numpy==2.5.4
+pillow==13.0.0
+tf2onnx==1.17.0
+onnx==1.23.2
+onnxruntime==1.32.0

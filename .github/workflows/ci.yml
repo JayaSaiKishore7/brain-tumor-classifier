@@ -25,6 +25,11 @@ jobs:
           cache: pip
           cache-dependency-path: requirements*.txt
 
+      # Runs the browser preprocessing code in tests/test_preprocess_js.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
@@ -34,8 +39,11 @@ jobs:
       - name: Format check
         run: ruff format --check .
 
-      - name: Tests (routes + model release gate)
+      - name: Tests (routes, model gate, ONNX parity, JS preprocessing, static build)
         run: pytest -v
+
+      - name: Build static site
+        run: python scripts/build_static.py
 
       - name: Production server starts and becomes healthy
         run: |

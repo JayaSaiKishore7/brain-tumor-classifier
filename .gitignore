@@ -6,6 +6,7 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+.venv-convert/
 venv/
 .pytest_cache/
 .ruff_cache/
@@ -15,3 +16,6 @@ venv/
 Thumbs.db
 
 train_log.txt
+
+# Static site build output (scripts/build_static.py)
+build/

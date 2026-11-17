@@ -209,6 +209,7 @@ brain-tumor-classifier/
 │   └── train.py                  # loads data, builds + trains the CNN, saves everything
 ├── model/
 │   ├── brain_tumor_cnn.keras     # trained model
+│   ├── brain_tumor_cnn.onnx      # same model for the browser (scripts/export_onnx.py)
 │   ├── class_names.json
 │   └── metrics.json              # accuracy, per-class report, confusion matrix
 ├── web/
@@ -221,7 +222,8 @@ brain-tumor-classifier/
 │   └── static/
 │       ├── style.css
 │       └── results/              # plots + sample predictions (written by train.py)
-├── tests/                        # pytest: routes + model release gate
+├── tests/                        # pytest: routes, model gate, ONNX parity, JS resize, build
+├── scripts/                      # export_onnx, build_static, deploy_hf, smoke_check
 ├── deploy/huggingface/README.md  # Space config (becomes the Space's README.md)
 ├── .github/workflows/ci.yml      # lint + tests + server health check
 ├── Dockerfile                    # serving image (Hugging Face Spaces)
@@ -294,31 +296,49 @@ The model loads in a background thread at startup (20–60 s cold); `/healthz` r
 
 No secrets are needed to run the app.
 
-## Deployment (Hugging Face Spaces)
+## Deployment (Hugging Face static Space, free)
 
-The `Dockerfile` builds the serving image (model + web app only; no dataset or training
-code). The Space's README with its config header lives at
-`deploy/huggingface/README.md` and becomes `README.md` at the Space root.
+The public site is a **static** Hugging Face Space: the same dashboard, plus a "try it"
+page that runs the model **in the visitor's browser** with
+[ONNX Runtime Web](https://onnxruntime.ai/). No server, so it's free, has no cold start,
+and uploaded scans never leave the visitor's device. (Docker and Gradio Spaces need a
+paid plan on free Hugging Face accounts.)
 
-Space: `JayaSaiKishore/brain-tumor-classifier` →
-https://jayasaikishore-brain-tumor-classifier.hf.space
+How the browser version stays faithful to the trained model:
+- `scripts/export_onnx.py` converts the Keras model to `model/brain_tumor_cnn.onnx` and
+  refuses to write it unless it matches Keras (max probability difference ~4e-7, same
+  labels). Run it after every retrain, in its own environment
+  (`requirements-export.txt`); `tests/test_static_site.py` fails if you forget.
+- `web/static/js/preprocess.js` is a port of Pillow's bicubic resize, so the browser
+  feeds the model exactly the pixels Python would. `tests/test_preprocess_js.py` checks
+  it against Pillow pixel-for-pixel (needs Node). Verified in Chrome on 30
+  original-size dataset scans (JPEG + PNG, grayscale + colour): 30/30 pixel-identical
+  model inputs and identical predictions to the Python app.
+- `scripts/build_static.py` renders the dashboard with the real Flask templates, so the
+  two versions can't drift apart.
 
 ```bash
-hf auth login                                 # once; token needs write access
-python scripts/deploy_hf.py --dry-run         # what would change in the Space
-python scripts/deploy_hf.py                   # lint + tests, then one atomic upload
-python scripts/smoke_check.py                 # wait for build, then dashboard + live prediction
+hf auth login                              # once; token needs write access
+python scripts/deploy_hf.py --dry-run      # build + show what would change
+python scripts/deploy_hf.py                # lint + tests, build, one atomic upload
+python scripts/smoke_check.py              # site up, right model served
+# then open the "try it" page and classify one image
 ```
 
 `deploy_hf.py` only deploys a clean, committed tree, records the git commit in the
-Space's commit message, and removes files from the Space that aren't part of the
-release, so the Space always mirrors exactly one commit. If `smoke_check.py` fails,
-roll back.
+Space's commit message, removes files that aren't part of the release (so the Space
+mirrors exactly one commit), and refuses non-static Spaces. First deploy to a new
+Space: add `--create`. Preview locally:
+`python -m http.server 8000 --directory build/static_site`.
+
+The Flask app (`web/serve.py`, `Dockerfile`) remains for running the server version
+yourself, anywhere Docker runs.
 
 **Rolling back:** the model is committed alongside the code, so any good commit is a
 complete, working version.
-- Fastest: `git checkout <good-commit>`, `python scripts/deploy_hf.py`, then
-  `git checkout main` (the Space commit history shows which commit each deploy came from).
+- Fastest: `git checkout <good-commit>`, `python scripts/deploy_hf.py --skip-checks`,
+  then `git checkout main` (the Space commit history shows which commit each deploy
+  came from).
 - Whole release: `git revert <bad-commit>`, push, and redeploy once CI is green.
 - Model only: `git checkout <good-commit> -- model/ web/static/results/`, commit,
   redeploy. Restore both directories together so the dashboard matches the model.
