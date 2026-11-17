@@ -6,7 +6,7 @@ colorTo: yellow
 sdk: docker
 app_port: 7860
 pinned: false
-short_description: Educational CNN that classifies brain MRI scans (not diagnostic)
+short_description: Educational brain MRI tumor classifier (not diagnostic)
 ---
 
 # Brain Tumor MRI Classifier
