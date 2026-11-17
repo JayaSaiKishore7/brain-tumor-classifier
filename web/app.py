@@ -77,6 +77,22 @@ def get_class_names():
     return _load_cached(CLASS_NAMES_PATH, _load_json)
 
 
+def model_is_loaded():
+    with _lock:
+        return MODEL_PATH in _cache and CLASS_NAMES_PATH in _cache
+
+
+def warm_up():
+    """Load the model ahead of the first request (TensorFlow import + load can take
+    20-60 s on a cold start). Called from serve.py in a background thread."""
+    try:
+        get_class_names()
+        get_model()
+        app.logger.info("Model warm-up complete")
+    except Exception:
+        app.logger.exception("Model warm-up failed")
+
+
 def load_metrics():
     path = os.path.join(MODEL_DIR, "metrics.json")
     return _load_json(path) if os.path.exists(path) else None
@@ -115,11 +131,14 @@ def predict():
 
     if request.method == "POST":
         file = request.files.get("image")
-        model = get_model()
-        class_names = get_class_names()
+        # Check for a file before touching the model, so an empty submission never
+        # triggers the (slow, cold-start) model load.
         if not file or file.filename == "":
             error = "Please choose an MRI image to upload."
-        elif model is None or class_names is None:
+            return render_template("predict.html", result=None, error=error, preview=None)
+        model = get_model()
+        class_names = get_class_names()
+        if model is None or class_names is None:
             error = "No trained model found yet. Run src/train.py first, then try again."
         else:
             # Only image decoding is guarded here; errors from the model itself
@@ -138,8 +157,10 @@ def predict():
                 # training=False keeps the augmentation layers switched off.
                 probs = np.asarray(model(arr, training=False))[0]
 
+                # strict=True: a class-count mismatch between model and class_names.json
+                # must fail loudly, not silently drop a class.
                 ranked = sorted(
-                    zip(class_names, probs.tolist()), key=lambda p: p[1], reverse=True
+                    zip(class_names, probs.tolist(), strict=True), key=lambda p: p[1], reverse=True
                 )
                 result = {
                     "label": ranked[0][0],
@@ -149,6 +170,17 @@ def predict():
                 preview = to_data_uri(img)
 
     return render_template("predict.html", result=result, error=error, preview=preview)
+
+
+@app.route("/healthz")
+def healthz():
+    """Readiness check: 200 only once the model is in memory and can serve predictions.
+
+    Deliberately doesn't trigger a model load itself, so health probes stay cheap.
+    """
+    if model_is_loaded():
+        return {"status": "ok", "model_loaded": True}, 200
+    return {"status": "starting", "model_loaded": False}, 503
 
 
 @app.errorhandler(413)
@@ -161,4 +193,10 @@ def upload_too_large(_err):
 if __name__ == "__main__":
     # The Werkzeug debugger allows arbitrary code execution from the browser, so it
     # is opt-in only: set FLASK_DEBUG=1 for local development.
-    app.run(debug=os.environ.get("FLASK_DEBUG") == "1", use_reloader=False, port=5500)
+    # This is the development server; production uses serve.py (waitress).
+    app.run(
+        debug=os.environ.get("FLASK_DEBUG") == "1",
+        use_reloader=False,
+        host=os.environ.get("HOST", "127.0.0.1"),
+        port=int(os.environ.get("PORT", "5500")),
+    )

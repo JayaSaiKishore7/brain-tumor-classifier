@@ -172,7 +172,7 @@ not an improvement from any change — worth keeping in mind when comparing sing
 
 ## Web app
 
-A small Flask app (`web/app.py`) with two routes:
+A small Flask app (`web/app.py`) with these routes:
 
 - **`/`** — reads `model/metrics.json` and `web/static/results/samples.json` fresh on
   every request (no caching), so the dashboard always reflects whatever the most recent
@@ -185,6 +185,8 @@ A small Flask app (`web/app.py`) with two routes:
   breakdown across all four classes. Uploads are never written to disk — the preview is
   sent back inline in the page, so nothing accumulates on the server. Files over 8 MB get
   a friendly error.
+- **`/healthz`** — readiness check: 503 while the model is loading, 200 once it can serve
+  predictions.
 
 The trained model and class names are loaded lazily on first request and cached in
 memory. The cache is keyed on file modification time, so after a retrain the next request
@@ -210,7 +212,8 @@ brain-tumor-classifier/
 │   ├── class_names.json
 │   └── metrics.json              # accuracy, per-class report, confusion matrix
 ├── web/
-│   ├── app.py                    # Flask app
+│   ├── app.py                    # Flask app (+ dev server)
+│   ├── serve.py                  # production server (waitress)
 │   ├── templates/
 │   │   ├── base.html
 │   │   ├── index.html            # results dashboard
@@ -218,18 +221,24 @@ brain-tumor-classifier/
 │   └── static/
 │       ├── style.css
 │       └── results/              # plots + sample predictions (written by train.py)
-├── requirements.txt
+├── tests/                        # pytest: routes + model release gate
+├── deploy/huggingface/README.md  # Space config (becomes the Space's README.md)
+├── .github/workflows/ci.yml      # lint + tests + server health check
+├── Dockerfile                    # serving image (Hugging Face Spaces)
+├── requirements.txt              # pinned runtime + training deps
+├── requirements-dev.txt          # + pytest, ruff
 └── README.md
 ```
 
 ## Running it yourself
 
-Requires Python 3.10+ and the packages in `requirements.txt` (TensorFlow, scikit-learn,
-pandas, pyarrow, Pillow, matplotlib, Flask). The committed model was saved with Keras
-3.15.1 and won't load on older Keras versions, hence the `keras>=3.15.1` pin.
+Requires Python 3.13 (`.python-version`) and the exact versions pinned in
+`requirements.txt`. The committed model was saved with Keras 3.15.1 and won't load on
+older Keras versions; every dependency is pinned so a fresh install next month gets the
+same stack. Upgrade deliberately: bump a version, run the tests, commit.
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # runtime + training + pytest/ruff
 
 # 1. Download the dataset (no auth needed, ~155MB)
 mkdir -p data
@@ -247,6 +256,55 @@ python app.py
 
 The Flask debugger is off by default because it allows running arbitrary code from the
 browser. For local development only, set `FLASK_DEBUG=1` before `python app.py`.
+
+### Tests and checks
+
+```bash
+ruff check . && ruff format --check .   # lint + formatting
+pytest                                  # routes + model release gate
+```
+
+`tests/test_model.py` is a release gate for the model: it fails if test accuracy in
+`model/metrics.json` drops below 95% (or any class F1 below 90%), or if the committed
+model no longer reproduces the 12 sample predictions shown on the dashboard — which is
+what a bad retrain or a behaviour-changing dependency upgrade looks like. CI
+(`.github/workflows/ci.yml`) runs all of this on every push and pull request, then
+starts the production server and waits for `/healthz` to return 200.
+
+### Production server
+
+`python app.py` is Flask's development server. For production use:
+
+```bash
+python web/serve.py      # waitress, 0.0.0.0:7860 by default
+```
+
+The model loads in a background thread at startup (20–60 s cold); `/healthz` returns
+503 until it's ready, then 200.
+
+### Environment variables
+
+| Variable | Used by | Default | Purpose |
+|---|---|---|---|
+| `FLASK_DEBUG` | `app.py` (dev) | off | `1` enables the Werkzeug debugger. **Never in production.** |
+| `HOST` | `app.py`, `serve.py` | `127.0.0.1` (dev) / `0.0.0.0` (prod) | Interface to bind |
+| `PORT` | `app.py`, `serve.py` | `5500` (dev) / `7860` (prod) | Port to listen on |
+| `THREADS` | `serve.py` | `4` | waitress worker threads |
+| `TF_CPP_MIN_LOG_LEVEL` | TensorFlow | `0` (`2` in Docker) | Quiets TensorFlow's startup logging |
+
+No secrets are needed to run the app.
+
+## Deployment (Hugging Face Spaces)
+
+The `Dockerfile` builds the serving image (model + web app only; no dataset or training
+code). The Space's README with its config header lives at
+`deploy/huggingface/README.md` and becomes `README.md` at the Space root.
+
+**Rolling back:** the model is committed alongside the code, so any good commit is a
+complete, working version.
+- Whole release: `git revert <bad-commit>`, push, and redeploy once CI is green.
+- Model only: `git checkout <good-commit> -- model/ web/static/results/`, commit,
+  redeploy. Restore both directories together so the dashboard matches the model.
 
 ## Limitations & disclaimer
 

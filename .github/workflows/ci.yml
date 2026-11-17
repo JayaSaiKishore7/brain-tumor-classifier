@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Format check
+        run: ruff format --check .
+
+      - name: Tests (routes + model release gate)
+        run: pytest -v
+
+      - name: Production server starts and becomes healthy
+        run: |
+          PORT=7860 python web/serve.py &
+          for i in $(seq 1 90); do
+            if curl -fs http://127.0.0.1:7860/healthz; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "server did not become healthy within 180s" >&2
+          exit 1

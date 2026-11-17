@@ -27,12 +27,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
+import tensorflow as tf
 from PIL import Image
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
-
-import tensorflow as tf
-from tensorflow.keras import layers, models, callbacks
+from tensorflow.keras import callbacks, layers, models
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_PATH = os.path.join(ROOT, "data", "brain_tumor.parquet")
@@ -223,9 +222,7 @@ def main():
     y_pred = np.argmax(probs, axis=1)
 
     test_acc = float(np.mean(y_pred == y_test))
-    test_loss = float(
-        np.mean(tf.keras.losses.sparse_categorical_crossentropy(y_test, probs))
-    )
+    test_loss = float(np.mean(tf.keras.losses.sparse_categorical_crossentropy(y_test, probs)))
     print(f"Test accuracy: {test_acc:.4f}")
 
     report = classification_report(
@@ -241,9 +238,9 @@ def main():
     metrics = {
         "test_accuracy": round(float(test_acc), 4),
         "test_loss": round(float(test_loss), 4),
-        "train_size": int(len(x_train)),
-        "val_size": int(len(x_val)),
-        "test_size": int(len(x_test)),
+        "train_size": len(x_train),
+        "val_size": len(x_val),
+        "test_size": len(x_test),
         "epochs_run": len(history.history["loss"]),
         "classification_report": report,
         "confusion_matrix": cm.tolist(),
