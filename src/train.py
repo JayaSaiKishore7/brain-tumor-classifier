@@ -1,10 +1,11 @@
 """
 Trains a classifier for brain MRI scans: glioma, meningioma, no tumor, pituitary.
 
-    python src/train.py                         # default architecture, writes the model
-    python src/train.py --arch cnn              # the original from-scratch CNN
-    python src/train.py --out build/exp/effnet  # experiment: write everything elsewhere
-    python src/train.py --out build/exp/effnet --resume 11 --batch-size 16
+    python src/train.py                         # the CNN (the adopted model), writes model/
+    python src/train.py --arch efficientnet     # transfer learning (experiment, not adopted)
+    python src/train.py --arch efficientnet --out build/exp/effnet
+                                                # experiment: write everything elsewhere
+    python src/train.py --arch efficientnet --out build/exp/effnet --resume 11 --batch-size 16
                                                 # continue an interrupted run, less memory
 
 Architectures:
@@ -12,7 +13,8 @@ Architectures:
                 head = GlobalAveragePooling -> Dropout -> Dense. That head makes Grad-CAM
                 exact and forward-only (see scripts/export_onnx.py), so heatmaps also
                 work in the browser.
-  cnn           the original 4-block CNN trained from scratch, 128x128 input.
+  cnn           4-block CNN trained from scratch, 128x128 input. The default and the
+                deployed model.
 
 Dataset: Hemg/Brain-Tumor-MRI-Dataset (Hugging Face), 7023 images, downloaded to
 data/brain_tumor.parquet. The 70/15/15 split is identical for every architecture and
@@ -54,7 +56,9 @@ DEFAULT_MODEL_DIR = os.path.join(ROOT, "model")
 DEFAULT_RESULTS_DIR = os.path.join(ROOT, "web", "static", "results")
 MODEL_FILE = "brain_tumor_cnn.keras"
 
-DEFAULT_ARCH = "efficientnet"
+# The CNN is the adopted model (see the README's transfer-learning experiment), so a plain
+# `python src/train.py` retrains it; EfficientNet is opt-in with --arch efficientnet.
+DEFAULT_ARCH = "cnn"
 IMG_SIZES = {"efficientnet": 160, "cnn": 128}
 SEED = 42
 BATCH_SIZE = 32  # --batch-size
