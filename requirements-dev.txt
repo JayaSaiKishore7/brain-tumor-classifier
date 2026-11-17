@@ -1,3 +1,4 @@
 -r requirements.txt
 pytest==9.2.0
 ruff==0.17.5
+huggingface_hub==2.4.0  # scripts/deploy_hf.py

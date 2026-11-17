@@ -300,8 +300,25 @@ The `Dockerfile` builds the serving image (model + web app only; no dataset or t
 code). The Space's README with its config header lives at
 `deploy/huggingface/README.md` and becomes `README.md` at the Space root.
 
+Space: `JayaSaiKishore/brain-tumor-classifier` →
+https://jayasaikishore-brain-tumor-classifier.hf.space
+
+```bash
+hf auth login                                 # once; token needs write access
+python scripts/deploy_hf.py --dry-run         # what would change in the Space
+python scripts/deploy_hf.py                   # lint + tests, then one atomic upload
+python scripts/smoke_check.py                 # wait for build, then dashboard + live prediction
+```
+
+`deploy_hf.py` only deploys a clean, committed tree, records the git commit in the
+Space's commit message, and removes files from the Space that aren't part of the
+release, so the Space always mirrors exactly one commit. If `smoke_check.py` fails,
+roll back.
+
 **Rolling back:** the model is committed alongside the code, so any good commit is a
 complete, working version.
+- Fastest: `git checkout <good-commit>`, `python scripts/deploy_hf.py`, then
+  `git checkout main` (the Space commit history shows which commit each deploy came from).
 - Whole release: `git revert <bad-commit>`, push, and redeploy once CI is green.
 - Model only: `git checkout <good-commit> -- model/ web/static/results/`, commit,
   redeploy. Restore both directories together so the dashboard matches the model.
