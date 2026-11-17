@@ -284,6 +284,31 @@ python web/serve.py      # waitress, 0.0.0.0:7860 by default
 The model loads in a background thread at startup (20–60 s cold); `/healthz` returns
 503 until it's ready, then 200.
 
+### JSON API (server version only)
+
+The Flask app also serves a JSON API for scripts and agents. It isn't available on the
+free static Space, which has no server; run the Flask app locally or with Docker.
+
+```bash
+curl -F image=@scan.jpg http://127.0.0.1:5500/api/predict
+```
+
+```json
+{
+  "label": "glioma",
+  "confidence": 0.9731,
+  "probabilities": {"glioma": 0.9731, "meningioma": 0.0254, "notumor": 0.0002, "pituitary": 0.0013},
+  "heatmap": {"class": "glioma", "grid": [[0.0, 0.12, ...], ...]},
+  "model": {"arch": "efficientnet", "input_size": 160, "test_accuracy": 0.98},
+  "disclaimer": "Educational project only. Not a diagnostic tool; not for medical decisions."
+}
+```
+
+Probabilities are 0–1. `heatmap.grid` is the Grad-CAM map for the predicted class over
+the whole image (rows top to bottom, values 0–1), or `null` for models without
+Grad-CAM support. Errors return `{"error": "..."}` with status 400 (no file / not an
+image), 413 (over 8 MB) or 503 (no trained model).
+
 ### Environment variables
 
 | Variable | Used by | Default | Purpose |

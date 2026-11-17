@@ -35,6 +35,17 @@
         {% endfor %}
       </div>
     </div>
+    {% if heatmap %}
+      <div class="heatmap-box">
+        <h2>Where the model looked</h2>
+        <img src="{{ heatmap }}" alt="Grad-CAM heatmap over the uploaded scan" />
+        <p class="sub heatmap-note">
+          Grad-CAM: warmer colours mark the regions that most influenced the
+          "{{ result.label }}" prediction. It's a coarse explanation of the model's
+          attention, not a tumour outline or segmentation.
+        </p>
+      </div>
+    {% endif %}
   </div>
 {% endif %}
 

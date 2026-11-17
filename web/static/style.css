@@ -271,6 +271,32 @@ p.sub.confidence {
   border: 1px solid var(--border);
 }
 
+.heatmap-box {
+  margin-top: 1.6rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--border);
+}
+
+.heatmap-box h2 {
+  margin: 0 0 0.8rem;
+  font-size: 1.1rem;
+}
+
+.heatmap-box img,
+.heatmap-box canvas {
+  display: block;
+  max-width: min(100%, 440px);
+  height: auto;
+  border-radius: 0.6rem;
+  border: 1px solid var(--border);
+}
+
+p.sub.heatmap-note {
+  margin: 0.7rem 0 0;
+  max-width: 60ch;
+  font-size: 0.82rem;
+}
+
 .predicted-label {
   font-size: 1.6rem;
   font-weight: 800;

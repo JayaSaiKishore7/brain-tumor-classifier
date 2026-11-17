@@ -15,6 +15,7 @@ venv/
 Thumbs.db
 
 train_log.txt
+model/history.json
 
 # Static site build output (scripts/build_static.py)
 build/

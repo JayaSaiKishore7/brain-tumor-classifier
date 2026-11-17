@@ -32,6 +32,17 @@ ORT_VERSION = "1.31.1"
 ORT_INTEGRITY = "sha384-tNxIwEqSlcdvKtUte98AsccPbDKM958LBXB/+3BLS42TTihXHKTWgdqPqXI/lot8"
 
 
+def onnx_input_size():
+    """Input size read from the ONNX model itself, so the page can't disagree with it."""
+    import onnx
+
+    dims = onnx.load(ONNX_MODEL, load_external_data=False).graph.input[0].type.tensor_type
+    height, width = (d.dim_value for d in dims.shape.dim[1:3])
+    if not height or height != width:
+        sys.exit(f"Unexpected ONNX input shape: {height}x{width}")
+    return height
+
+
 def relink(html):
     """Flask URLs are root-absolute (/static/..., /predict); make them relative files."""
     html = html.replace('="/static/', '="static/')
@@ -68,7 +79,7 @@ def main(out=OUT):
         predict = render_template(
             "predict_static.html",
             class_names=class_names,
-            img_size=webapp.IMG_SIZE,
+            img_size=onnx_input_size(),
             max_upload_mb=webapp.MAX_UPLOAD_MB,
             ort_version=ORT_VERSION,
             ort_integrity=ORT_INTEGRITY,

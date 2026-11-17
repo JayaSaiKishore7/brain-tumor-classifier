@@ -61,6 +61,44 @@ def test_predict_returns_a_class(client, samples):
     assert "data:image/jpeg;base64," in body  # preview rendered inline
 
 
+def api_upload(client, data, filename="scan.jpg"):
+    return client.post(
+        "/api/predict",
+        data={"image": (io.BytesIO(data), filename)},
+        content_type="multipart/form-data",
+    )
+
+
+def test_api_predict_returns_json(client, samples, metrics):
+    with open(sample_path(samples[0]["file"]), "rb") as f:
+        r = api_upload(client, f.read())
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["label"] == samples[0]["predicted"]
+    assert abs(body["confidence"] - samples[0]["confidence"]) < 1e-4
+    probs = body["probabilities"]
+    assert set(probs) == set(metrics["class_names"])
+    assert abs(sum(probs.values()) - 1) < 1e-3
+    assert body["confidence"] == max(probs.values())
+    assert body["model"]["input_size"] > 0
+    assert "Not a diagnostic tool" in body["disclaimer"]
+
+
+def test_api_errors_are_json(client, app_module):
+    r = client.post("/api/predict", data={}, content_type="multipart/form-data")
+    assert r.status_code == 400 and "choose an MRI image" in r.get_json()["error"]
+
+    r = api_upload(client, b"definitely not an image")
+    assert r.status_code == 400 and "Couldn't read" in r.get_json()["error"]
+
+    r = api_upload(client, b"0" * (app_module.MAX_UPLOAD_MB * 1024 * 1024 + 1))
+    assert r.status_code == 413 and "too large" in r.get_json()["error"]
+
+
+def test_api_rejects_get(client):
+    assert client.get("/api/predict").status_code == 405
+
+
 def test_healthz_not_ready_before_model_load(client, app_module, monkeypatch):
     monkeypatch.setattr(app_module, "model_is_loaded", lambda: False)
     r = client.get("/healthz")

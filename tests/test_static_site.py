@@ -20,10 +20,12 @@ ONNX_PATH = os.path.join(ROOT, "model", "brain_tumor_cnn.onnx")
 def test_onnx_model_matches_keras(app_module, samples):
     """Fails if the model was retrained but scripts/export_onnx.py wasn't re-run."""
     model = app_module.get_model()
+    size = app_module.input_size(model)
+    assert build_static.onnx_input_size() == size, "ONNX and Keras input sizes differ"
     session = ort.InferenceSession(ONNX_PATH, providers=["CPUExecutionProvider"])
     batch = np.stack(
         [
-            np.array(Image.open(sample_path(s["file"])).convert("RGB").resize((128, 128)))
+            np.array(Image.open(sample_path(s["file"])).convert("RGB").resize((size, size)))
             for s in samples
         ]
     ).astype(np.float32)
