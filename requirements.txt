@@ -16,3 +16,8 @@ pandas==3.1.1
 pyarrow==26.0.1
 scikit-learn==1.9.1
 matplotlib==3.11.2
+
+# Keras -> ONNX export for the in-browser static site (run automatically by train.py)
+tf2onnx==1.17.0
+onnx==1.23.2
+onnxruntime==1.32.0

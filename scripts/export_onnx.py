@@ -2,14 +2,11 @@
 Export the trained Keras model to ONNX for in-browser inference (static site), and
 verify the ONNX model gives the same results as the Keras original.
 
-Needs its own environment (tf2onnx's dependencies are kept out of the serving stack):
+    python scripts/export_onnx.py
 
-    python -m venv .venv-convert
-    .venv-convert\\Scripts\\pip install -r requirements-export.txt
-    .venv-convert\\Scripts\\python scripts/export_onnx.py
-
-Writes model/brain_tumor_cnn.onnx (committed, like the .keras file; re-run this after
-every retrain; the tests fail if the two models disagree). Fails (non-zero exit) if any of the dashboard's 12
+src/train.py runs this automatically at the end of training, so a retrain always
+produces a matching ONNX model. Writes model/brain_tumor_cnn.onnx (committed, like the
+.keras file; the tests fail if the two models disagree). Fails (non-zero exit) if any of the dashboard's 12
 sample images gets a different label, or probabilities differ by more than 1e-4.
 """
 

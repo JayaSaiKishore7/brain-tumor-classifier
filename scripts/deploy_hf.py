@@ -15,6 +15,8 @@ Safety rails:
     accounts and would upload fine but never run.
   - Only creates a Space when --create is passed, and only as a free static Space.
   - The Space commit message records the source git commit, for rollback.
+  - After uploading, runs smoke_check.py and browser_check.py (a real in-browser
+    prediction) against the live site, and prints rollback steps if either fails.
 
 Rollback: check out the last good commit, run this script again, check out main.
 """
@@ -122,7 +124,17 @@ def main():
     )
     print("Deployed:", commit.commit_url)
     print(f"Space page: https://huggingface.co/spaces/{SPACE_ID}")
-    print("Next: python scripts/smoke_check.py")
+
+    # Post-deploy verification: the live site, checked the way a visitor uses it.
+    for script in ("smoke_check.py", "browser_check.py"):
+        print(f"$ {script}")
+        cmd = [sys.executable, os.path.join(ROOT, "scripts", script)]
+        if subprocess.run(cmd, cwd=ROOT, check=False).returncode != 0:
+            sys.exit(
+                f"POST-DEPLOY CHECK FAILED ({script}). Roll back: git checkout <last good "
+                "commit>; python scripts/deploy_hf.py --skip-checks; git checkout main"
+            )
+    print("Deploy verified.")
 
 
 if __name__ == "__main__":

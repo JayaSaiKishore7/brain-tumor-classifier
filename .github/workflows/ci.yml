@@ -47,6 +47,13 @@ jobs:
       - name: Build static site
         run: python scripts/build_static.py
 
+      - name: Browser test of the built site (real in-browser predictions)
+        run: |
+          python -m playwright install --with-deps chromium
+          python -m http.server 8000 --bind 127.0.0.1 --directory build/static_site &
+          sleep 2
+          python scripts/browser_check.py http://127.0.0.1:8000
+
       - name: Production server starts and becomes healthy
         run: |
           PORT=7860 python web/serve.py &

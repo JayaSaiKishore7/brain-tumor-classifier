@@ -223,7 +223,7 @@ brain-tumor-classifier/
 │       ├── style.css
 │       └── results/              # plots + sample predictions (written by train.py)
 ├── tests/                        # pytest: routes, model gate, ONNX parity, JS resize, build
-├── scripts/                      # export_onnx, build_static, deploy_hf, smoke_check
+├── scripts/                      # export_onnx, build_static, deploy_hf, smoke/browser checks
 ├── deploy/huggingface/README.md  # Space config (becomes the Space's README.md)
 ├── .github/workflows/ci.yml      # lint + tests + server health check
 ├── Dockerfile                    # serving image (Hugging Face Spaces)
@@ -307,8 +307,8 @@ paid plan on free Hugging Face accounts.)
 How the browser version stays faithful to the trained model:
 - `scripts/export_onnx.py` converts the Keras model to `model/brain_tumor_cnn.onnx` and
   refuses to write it unless it matches Keras (max probability difference ~4e-7, same
-  labels). Run it after every retrain, in its own environment
-  (`requirements-export.txt`); `tests/test_static_site.py` fails if you forget.
+  labels). `src/train.py` runs it automatically at the end of training, and
+  `tests/test_static_site.py` fails if the two models ever disagree.
 - `web/static/js/preprocess.js` is a port of Pillow's bicubic resize, so the browser
   feeds the model exactly the pixels Python would. `tests/test_preprocess_js.py` checks
   it against Pillow pixel-for-pixel (needs Node). Verified in Chrome on 30
@@ -320,16 +320,33 @@ How the browser version stays faithful to the trained model:
 ```bash
 hf auth login                              # once; token needs write access
 python scripts/deploy_hf.py --dry-run      # build + show what would change
-python scripts/deploy_hf.py                # lint + tests, build, one atomic upload
-python scripts/smoke_check.py              # site up, right model served
-# then open the "try it" page and classify one image
+python scripts/deploy_hf.py                # lint + tests, build, upload, verify live
 ```
 
 `deploy_hf.py` only deploys a clean, committed tree, records the git commit in the
 Space's commit message, removes files that aren't part of the release (so the Space
 mirrors exactly one commit), and refuses non-static Spaces. First deploy to a new
-Space: add `--create`. Preview locally:
-`python -m http.server 8000 --directory build/static_site`.
+Space: add `--create`. After uploading it verifies the live site and prints rollback
+steps if anything fails:
+- `scripts/smoke_check.py`: site up, dashboard shows this model, every file served,
+  live ONNX model byte-identical to the committed one.
+- `scripts/browser_check.py`: headless Chromium opens the "try it" page, classifies
+  three dashboard samples (expects the same labels and confidences, ±0.02%), checks a
+  non-image upload gets the friendly error, and fails on any JavaScript error.
+
+Preview locally: `python -m http.server 8000 --directory build/static_site`, then
+`python scripts/browser_check.py http://127.0.0.1:8000`.
+
+### Monitoring
+
+With no server there are no server logs, so the site is monitored the way a visitor
+uses it. `.github/workflows/monitor.yml` runs the smoke check and the browser check
+against the live Space every 6 hours (or on demand from the Actions tab). GitHub
+emails the repo owner when a scheduled run fails. A failure means the site is down,
+the page is broken, or the live model differs from `main` (e.g. a retrain committed
+but not deployed). CI runs the same browser check against a fresh build of every
+commit, so most breakage is caught before release. Scheduled workflows are disabled
+by GitHub after 60 days without repository activity; re-enable from the Actions tab.
 
 The Flask app (`web/serve.py`, `Dockerfile`) remains for running the server version
 yourself, anywhere Docker runs.

@@ -1,0 +1,41 @@
+name: Monitor live site
+
+# Post-release monitoring for the static Hugging Face Space. There is no server to
+# collect errors from, so this checks the site the way a visitor uses it: site up, the
+# right model served, and a real in-browser prediction. A failed run emails the repo
+# owner (GitHub's default notification for failed scheduled workflows).
+#
+# Note: GitHub disables scheduled workflows after 60 days without repository activity;
+# re-enable from the Actions tab if that happens.
+
+on:
+  schedule:
+    - cron: "17 */6 * * *" # every 6 hours (off the hour, when GitHub is less busy)
+  workflow_dispatch: # run on demand from the Actions tab
+
+permissions:
+  contents: read
+
+jobs:
+  live-site:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Install check tools only (no TensorFlow needed)
+        run: |
+          pip install playwright==1.64.1
+          python -m playwright install --with-deps chromium
+
+      # Fails if the site is down, or if the live model differs from main's
+      # (a retrain committed but not yet deployed also shows up here).
+      - name: Smoke check (site up, correct model served)
+        run: python scripts/smoke_check.py --timeout 120
+
+      - name: Browser check (real prediction in Chromium)
+        run: python scripts/browser_check.py

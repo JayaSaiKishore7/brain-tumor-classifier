@@ -154,7 +154,10 @@ $("form").addEventListener("submit", async (event) => {
   try {
     render(file, await classify(file));
   } catch (err) {
-    console.error(err);
+    // A bad upload is the visitor's mistake, not a site error: warn, don't error, so
+    // console errors (which monitoring treats as failures) only mean real breakage.
+    if (err instanceof BadImageError) console.warn("Unreadable image:", err.message);
+    else console.error(err);
     $("result").hidden = true;
     showError(
       err instanceof BadImageError

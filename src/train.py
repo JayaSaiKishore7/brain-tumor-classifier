@@ -7,6 +7,7 @@ downloaded to data/brain_tumor.parquet.
 
 Outputs (all under model/ and web/static/results/):
   model/brain_tumor_cnn.keras   - trained model
+  model/brain_tumor_cnn.onnx    - same model for the in-browser site (verified to match)
   model/class_names.json        - label index -> class name
   model/metrics.json            - test accuracy + per-class precision/recall/f1
   web/static/results/training_history.png
@@ -19,6 +20,7 @@ import io
 import json
 import os
 import random
+import sys
 
 import matplotlib
 
@@ -153,24 +155,33 @@ def save_confusion_matrix(y_true, y_pred, class_names):
     return cm
 
 
-def save_sample_predictions(x_test, y_true, y_pred, probs, class_names, n=12):
+def save_sample_predictions(model, x_test, y_true, class_names, n=12):
     # Remove images from previous runs so a smaller n doesn't leave stale files behind.
     for old in os.listdir(SAMPLES_DIR):
         if old.startswith("sample_") and old.endswith(".jpg"):
             os.remove(os.path.join(SAMPLES_DIR, old))
 
     idx = np.random.choice(len(x_test), size=n, replace=False)
-    samples = []
-    for rank, i in enumerate(idx):
-        fname = f"sample_{rank:02d}.jpg"
+    files = [f"sample_{rank:02d}.jpg" for rank in range(n)]
+    for fname, i in zip(files, idx, strict=True):
         Image.fromarray(x_test[i]).save(os.path.join(SAMPLES_DIR, fname))
+
+    # Predict on the saved JPEGs, not the raw arrays: JPEG is lossy, so the gallery must
+    # show the confidence a visitor gets when they classify that exact picture.
+    shown = np.stack(
+        [np.array(Image.open(os.path.join(SAMPLES_DIR, f)).convert("RGB")) for f in files]
+    )
+    probs = np.asarray(model(shown, training=False))
+    samples = []
+    for fname, i, p in zip(files, idx, probs, strict=True):
+        predicted = int(np.argmax(p))
         samples.append(
             {
                 "file": fname,
                 "actual": class_names[int(y_true[i])],
-                "predicted": class_names[int(y_pred[i])],
-                "confidence": round(float(np.max(probs[i])), 4),
-                "correct": bool(y_true[i] == y_pred[i]),
+                "predicted": class_names[predicted],
+                "confidence": round(float(np.max(p)), 4),
+                "correct": bool(y_true[i] == predicted),
             }
         )
     with open(os.path.join(RESULTS_DIR, "samples.json"), "w") as f:
@@ -233,7 +244,7 @@ def main():
         output_dict=True,
     )
     cm = save_confusion_matrix(y_test, y_pred, class_names)
-    save_sample_predictions(x_test, y_test, y_pred, probs, class_names)
+    save_sample_predictions(model, x_test, y_test, class_names)
 
     metrics = {
         "test_accuracy": round(float(test_acc), 4),
@@ -253,7 +264,15 @@ def main():
         json.dump(class_names, f, indent=2)
 
     model.save(os.path.join(MODEL_DIR, "brain_tumor_cnn.keras"))
-    print("Done. Model + metrics + plots saved.")
+    print("Model + metrics + plots saved.")
+
+    # Keep the browser (ONNX) model in sync: export it and verify it matches Keras.
+    # Exits non-zero if they disagree, so a retrain can't leave the static site stale.
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import export_onnx
+
+    export_onnx.main()
+    print("Done.")
 
 
 if __name__ == "__main__":
