@@ -25,7 +25,8 @@ def test_class_names_consistent(app_module, metrics):
 def test_model_output_shape(app_module):
     model = app_module.get_model()
     n = len(app_module.get_class_names())
-    arr = np.zeros((1, app_module.IMG_SIZE, app_module.IMG_SIZE, 3), dtype=np.uint8)
+    size = app_module.input_size(model)
+    arr = np.zeros((1, size, size, 3), dtype=np.uint8)
     probs = np.asarray(model(arr, training=False))
     assert probs.shape == (1, n)
     assert np.isclose(probs.sum(), 1.0, atol=1e-4)
@@ -39,7 +40,8 @@ def test_model_reproduces_published_sample_predictions(app_module, samples):
     mismatches = []
     for s in samples:
         img = Image.open(sample_path(s["file"])).convert("RGB")
-        img = img.resize((app_module.IMG_SIZE, app_module.IMG_SIZE))
+        size = app_module.input_size(model)
+        img = img.resize((size, size))
         arr = np.array(img, dtype=np.uint8)[None, ...]
         probs = np.asarray(model(arr, training=False))[0]
         predicted = class_names[int(np.argmax(probs))]

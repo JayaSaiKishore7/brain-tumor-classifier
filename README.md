@@ -284,6 +284,31 @@ python web/serve.py      # waitress, 0.0.0.0:7860 by default
 The model loads in a background thread at startup (20–60 s cold); `/healthz` returns
 503 until it's ready, then 200.
 
+### JSON API (server version only)
+
+The Flask app also serves a JSON API for scripts and agents. It isn't available on the
+free static Space, which has no server; run the Flask app locally or with Docker.
+
+```bash
+curl -F image=@scan.jpg http://127.0.0.1:5500/api/predict
+```
+
+```json
+{
+  "label": "glioma",
+  "confidence": 0.9731,
+  "probabilities": {"glioma": 0.9731, "meningioma": 0.0254, "notumor": 0.0002, "pituitary": 0.0013},
+  "heatmap": {"class": "glioma", "grid": [[0.0, 0.12, ...], ...]},
+  "model": {"arch": "efficientnet", "input_size": 160, "test_accuracy": 0.98},
+  "disclaimer": "Educational project only. Not a diagnostic tool; not for medical decisions."
+}
+```
+
+Probabilities are 0–1. `heatmap.grid` is the Grad-CAM map for the predicted class over
+the whole image (rows top to bottom, values 0–1), or `null` for models without
+Grad-CAM support. Errors return `{"error": "..."}` with status 400 (no file / not an
+image), 413 (over 8 MB) or 503 (no trained model).
+
 ### Environment variables
 
 | Variable | Used by | Default | Purpose |
@@ -371,6 +396,33 @@ complete, working version.
 - CPU-only training on 128×128 images trades off some resolution/detail for speed; a
   higher input resolution or transfer learning from a pretrained vision model would
   likely close most of the remaining gap on meningioma.
+
+## Transfer learning experiment (EfficientNetB0)
+
+`python src/train.py --arch efficientnet` trains EfficientNetB0 (ImageNet weights) at
+160×160 on the **same** 70/15/15 split: the head first, on cached backbone features,
+then fine-tuning blocks 6–7 with BatchNorm frozen. Result, compared with the current
+from-scratch CNN:
+
+| | Validation acc. | Test acc. | glioma F1 | meningioma F1 | notumor F1 | pituitary F1 |
+|---|---|---|---|---|---|---|
+| CNN (current model) | 96.4% | **97.53%** | **96.9%** | **95.6%** | 99.2% | **98.1%** |
+| EfficientNetB0 | **96.96%** | 96.77% | 95.4% | 94.5% | **99.5%** | 97.0% |
+
+Not adopted: slightly better on validation, slightly worse on test, and every gap is a
+handful of images, i.e. within run-to-run noise. On a CPU-only laptop, higher input
+resolution (224) and fine-tuning deeper blocks are the obvious next steps, but they need
+more memory than this machine had free.
+
+### Grad-CAM heatmaps
+
+Models with a GlobalAveragePooling → Dense head (the EfficientNet one) show a Grad-CAM
+heatmap ("where the model looked") on both prediction pages and in the API. For that
+head, Grad-CAM equals `feature_map @ dense_weights`, so it needs no gradients and the
+exported ONNX model computes it too (`cam` output), letting the browser draw it.
+`tests/test_gradcam.py` checks this against a real gradient computation (max difference
+~2e-7 on the sample images). The current CNN has no such head, so no heatmap is shown
+and those tests are skipped.
 
 ## Possible improvements
 

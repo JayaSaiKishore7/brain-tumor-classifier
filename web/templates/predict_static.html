@@ -30,6 +30,15 @@
       <div id="breakdown"></div>
     </div>
   </div>
+  <div class="heatmap-box" id="heatmap-box" hidden>
+    <h2>Where the model looked</h2>
+    <canvas id="heatmap" role="img" aria-label="Grad-CAM heatmap over the uploaded scan"></canvas>
+    <p class="sub heatmap-note">
+      Grad-CAM: warmer colours mark the regions that most influenced the
+      "<span id="heatmap-label"></span>" prediction. It's a coarse explanation of the
+      model's attention, not a tumour outline or segmentation.
+    </p>
+  </div>
 </div>
 
 <p class="disclaimer">

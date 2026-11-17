@@ -102,10 +102,84 @@ async function classify(file) {
   const pixels = resizeRGB(rgb, width, height, size, size);
   const input = new ort.Tensor("float32", Float32Array.from(pixels), [1, size, size, 3]);
   const output = await session.run({ [session.inputNames[0]]: input });
-  const probs = Array.from(output[session.outputNames[0]].data);
-  return config.classNames
-    .map((name, i) => ({ name, pct: Math.round(probs[i] * 10000) / 100 }))
+  const probs = Array.from((output.probabilities ?? output[session.outputNames[0]]).data);
+  const ranked = config.classNames
+    .map((name, i) => ({ name, index: i, pct: Math.round(probs[i] * 10000) / 100 }))
     .sort((a, b) => b.pct - a.pct);
+  // Grad-CAM grid for the top class, if the model provides one (see export_onnx.py).
+  const cam = output.cam ? camForClass(output.cam, ranked[0].index) : null;
+  return { ranked, cam };
+}
+
+// cam tensor: [1, h, w, classes] -> {h, w, values} for one class, ReLU'd, scaled to 0-1.
+function camForClass(tensor, classIndex) {
+  const [, h, w, classes] = tensor.dims;
+  const values = new Float32Array(h * w);
+  let peak = 0;
+  for (let i = 0; i < h * w; i++) {
+    const v = Math.max(tensor.data[i * classes + classIndex], 0);
+    values[i] = v;
+    if (v > peak) peak = v;
+  }
+  if (peak > 0) for (let i = 0; i < values.length; i++) values[i] /= peak;
+  return { h, w, values };
+}
+
+// Same colour stops as HEATMAP_STOPS in web/app.py.
+const STOPS = [
+  [0, 0, 128],
+  [0, 160, 255],
+  [60, 220, 120],
+  [255, 220, 0],
+  [230, 30, 30],
+];
+const PREVIEW_SIZE = 512;
+
+function sampleBilinear({ h, w, values }, x, y) {
+  // Pixel-centre aligned, clamped at the edges.
+  const fx = Math.min(Math.max(x - 0.5, 0), w - 1);
+  const fy = Math.min(Math.max(y - 0.5, 0), h - 1);
+  const x0 = Math.floor(fx), y0 = Math.floor(fy);
+  const x1 = Math.min(x0 + 1, w - 1), y1 = Math.min(y0 + 1, h - 1);
+  const ax = fx - x0, ay = fy - y0;
+  const top = values[y0 * w + x0] * (1 - ax) + values[y0 * w + x1] * ax;
+  const bottom = values[y1 * w + x0] * (1 - ax) + values[y1 * w + x1] * ax;
+  return top * (1 - ay) + bottom * ay;
+}
+
+async function renderHeatmap(file, cam, label) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, PREVIEW_SIZE / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = $("heatmap");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+
+  // The model saw the whole image squashed to a square, so the grid maps onto the full
+  // image by scaling each axis independently.
+  const image = ctx.getImageData(0, 0, width, height);
+  const px = image.data;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const v = sampleBilinear(cam, ((x + 0.5) * cam.w) / width, ((y + 0.5) * cam.h) / height);
+      const t = v * (STOPS.length - 1);
+      const lo = Math.min(Math.floor(t), STOPS.length - 2);
+      const f = t - lo;
+      const alpha = 0.15 + 0.5 * v; // low attention stays mostly see-through
+      const o = (y * width + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        const colour = STOPS[lo][c] * (1 - f) + STOPS[lo + 1][c] * f;
+        px[o + c] = px[o + c] * (1 - alpha) + colour * alpha;
+      }
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+  $("heatmap-label").textContent = label;
+  $("heatmap-box").hidden = false;
 }
 
 function render(file, ranked) {
@@ -151,8 +225,14 @@ $("form").addEventListener("submit", async (event) => {
     return;
   }
   $("submit").disabled = true;
+  $("heatmap-box").hidden = true;
   try {
-    render(file, await classify(file));
+    const { ranked, cam } = await classify(file);
+    render(file, ranked);
+    if (cam) {
+      // The heatmap is extra: if drawing it fails, keep the prediction on screen.
+      await renderHeatmap(file, cam, ranked[0].name).catch((err) => console.error(err));
+    }
   } catch (err) {
     // A bad upload is the visitor's mistake, not a site error: warn, don't error, so
     // console errors (which monitoring treats as failures) only mean real breakage.

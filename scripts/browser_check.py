@@ -38,6 +38,9 @@ def main():
 
     with open(os.path.join(SAMPLES_DIR, "samples.json")) as f:
         expected = {s["file"]: s for s in json.load(f)}
+    with open(os.path.join(ROOT, "model", "metrics.json")) as f:
+        # EfficientNet models export a Grad-CAM output; the page must show it.
+        expect_heatmap = json.load(f).get("arch") == "efficientnet"
 
     failures = []
     with sync_playwright() as p:
@@ -71,6 +74,15 @@ def main():
             )
             if not ok:
                 failures.append(name)
+            if expect_heatmap:
+                page.wait_for_selector("#heatmap-box:not([hidden])", timeout=10_000)
+                drawn = page.evaluate(
+                    "(() => { const c = document.getElementById('heatmap');"
+                    " return c.width > 0 && c.height > 0; })()"
+                )
+                print(f"[{'PASS' if drawn else 'FAIL'}] {name}: Grad-CAM heatmap drawn")
+                if not drawn:
+                    failures.append(f"{name} heatmap")
 
         page.set_input_files(
             "#file",
