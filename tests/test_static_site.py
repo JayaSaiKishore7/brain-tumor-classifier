@@ -30,7 +30,7 @@ def test_onnx_model_matches_keras(app_module, samples):
         ]
     ).astype(np.float32)
     keras_p = np.asarray(model(batch, training=False))
-    onnx_p = session.run(None, {session.get_inputs()[0].name: batch})[0]
+    onnx_p = session.run(["probabilities"], {"image": batch})[0]
     assert np.max(np.abs(keras_p - onnx_p)) < 1e-4
     assert (keras_p.argmax(1) == onnx_p.argmax(1)).all()
 

@@ -35,6 +35,38 @@ def load_image(path, size):
     return np.array(img, dtype=np.float32)
 
 
+def write_onnx(fn, path):
+    """Freeze a tf.function and convert it to ONNX with named input/outputs.
+
+    Freezing bakes every captured value into the graph as a constant (EfficientNet's
+    input-normalisation constants, the Grad-CAM weights); without it tf2onnx turns them
+    into extra model *inputs* the browser can't supply. Outputs are named after the
+    function's output dict keys ("probabilities", "cam") so callers never rely on order.
+    """
+    import onnx
+    from tensorflow.python.framework.convert_to_constants import (
+        convert_variables_to_constants_v2,
+    )
+
+    concrete = fn.get_concrete_function()
+    frozen = convert_variables_to_constants_v2(concrete)
+    tf_inputs = [t.name for t in frozen.inputs]
+    tf_outputs = [t.name for t in frozen.outputs]
+    # tf.nest flattens dicts in sorted key order, the same order as frozen.outputs.
+    names = dict(zip(tf_outputs, sorted(concrete.structured_outputs), strict=True))
+    names[tf_inputs[0]] = "image"
+    proto, _ = tf2onnx.convert.from_graph_def(
+        frozen.graph.as_graph_def(), input_names=tf_inputs, output_names=tf_outputs, opset=17
+    )
+    for value in list(proto.graph.input) + list(proto.graph.output):
+        value.name = names.get(value.name, value.name)
+    for node in proto.graph.node:
+        node.input[:] = [names.get(n, n) for n in node.input]
+        node.output[:] = [names.get(n, n) for n in node.output]
+    onnx.checker.check_model(proto)
+    onnx.save(proto, path)
+
+
 def main():
     model = tf.keras.models.load_model(MODEL_PATH)
     IMG_SIZE = int(model.input_shape[1])
@@ -67,7 +99,7 @@ def main():
         return outputs
 
     os.makedirs(OUT_DIR, exist_ok=True)
-    tf2onnx.convert.from_function(serve, input_signature=signature, opset=17, output_path=OUT_PATH)
+    write_onnx(serve, OUT_PATH)
     print(f"Wrote {OUT_PATH} ({os.path.getsize(OUT_PATH) / 1e6:.1f} MB)")
 
     session = ort.InferenceSession(OUT_PATH, providers=["CPUExecutionProvider"])

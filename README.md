@@ -397,6 +397,33 @@ complete, working version.
   higher input resolution or transfer learning from a pretrained vision model would
   likely close most of the remaining gap on meningioma.
 
+## Transfer learning experiment (EfficientNetB0)
+
+`python src/train.py --arch efficientnet` trains EfficientNetB0 (ImageNet weights) at
+160×160 on the **same** 70/15/15 split: the head first, on cached backbone features,
+then fine-tuning blocks 6–7 with BatchNorm frozen. Result, compared with the current
+from-scratch CNN:
+
+| | Validation acc. | Test acc. | glioma F1 | meningioma F1 | notumor F1 | pituitary F1 |
+|---|---|---|---|---|---|---|
+| CNN (current model) | 96.4% | **97.53%** | **96.9%** | **95.6%** | 99.2% | **98.1%** |
+| EfficientNetB0 | **96.96%** | 96.77% | 95.4% | 94.5% | **99.5%** | 97.0% |
+
+Not adopted: slightly better on validation, slightly worse on test, and every gap is a
+handful of images, i.e. within run-to-run noise. On a CPU-only laptop, higher input
+resolution (224) and fine-tuning deeper blocks are the obvious next steps, but they need
+more memory than this machine had free.
+
+### Grad-CAM heatmaps
+
+Models with a GlobalAveragePooling → Dense head (the EfficientNet one) show a Grad-CAM
+heatmap ("where the model looked") on both prediction pages and in the API. For that
+head, Grad-CAM equals `feature_map @ dense_weights`, so it needs no gradients and the
+exported ONNX model computes it too (`cam` output), letting the browser draw it.
+`tests/test_gradcam.py` checks this against a real gradient computation (max difference
+~2e-7 on the sample images). The current CNN has no such head, so no heatmap is shown
+and those tests are skipped.
+
 ## Possible improvements
 
 - Transfer learning from a pretrained backbone (e.g. EfficientNet, ResNet)
