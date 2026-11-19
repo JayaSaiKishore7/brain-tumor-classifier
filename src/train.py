@@ -210,10 +210,12 @@ def build_resnet50(num_classes, img_size):
 # Per transfer-learning architecture: how to build it, the backbone's layer name inside
 # the model, and the first block that gets unfrozen for fine-tuning.
 TRANSFER = {
-    "efficientnet": {"build": build_efficientnet, "backbone": "efficientnetb0",
-                     "first_block": "block6a"},
-    "resnet50": {"build": build_resnet50, "backbone": "resnet50",
-                 "first_block": "conv5_block1"},
+    "efficientnet": {
+        "build": build_efficientnet,
+        "backbone": "efficientnetb0",
+        "first_block": "block6a",
+    },
+    "resnet50": {"build": build_resnet50, "backbone": "resnet50", "first_block": "conv5_block1"},
 }
 
 
@@ -287,7 +289,7 @@ def train_head_on_cached_features(
     if "preprocess" in layer_names:
         preprocess = model.get_layer("preprocess")
     else:
-        preprocess = lambda x: x  # noqa: E731
+        preprocess = lambda x: x
 
     def features(x):
         return np.concatenate(
@@ -499,9 +501,7 @@ def main():
     if args.resume:
         if args.arch not in TRANSFER:
             sys.exit("--resume is only for efficientnet/resnet50 fine-tuning runs.")
-        model, history, boundary = resume(
-            args.arch, data, model_path, history_path, args.resume
-        )
+        model, history, boundary = resume(args.arch, data, model_path, history_path, args.resume)
     else:
         model, history, boundary = train(
             args.arch, len(class_names), img_size, data, model_path, history_path
