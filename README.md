@@ -23,7 +23,7 @@ live prediction.
 - [Architecture](#architecture)
 - [Training setup](#training-setup)
 - [Results](#results)
-- [Transfer learning experiment](#transfer-learning-experiment-efficientnetb0)
+- [Transfer learning experiments](#transfer-learning-experiments-efficientnetb0-and-resnet-50)
 - [The site and the app](#the-site-and-the-app)
 - [Project structure](#project-structure)
 - [Running it yourself](#running-it-yourself)
@@ -180,35 +180,57 @@ not an improvement from any change — worth keeping in mind when comparing sing
 
 ![Training curves](web/static/results/training_history.png)
 
-## Transfer learning experiment (EfficientNetB0)
+## Transfer learning experiments (EfficientNetB0 and ResNet-50)
 
-`python src/train.py --arch efficientnet` trains EfficientNetB0 (ImageNet weights) at
-160×160 on the **same** 70/15/15 split: first the head, on backbone features computed
-once, then fine-tuning blocks 6–7 with BatchNorm frozen. Result, compared with the
-current from-scratch CNN:
+Two ImageNet-pretrained models were trained on the **same** 70/15/15 split as the CNN,
+each in two phases: first the classification head on backbone features computed once,
+then fine-tuning the top of the backbone with BatchNorm frozen.
 
-| | Validation acc. | Test acc. | glioma F1 | meningioma F1 | notumor F1 | pituitary F1 |
-|---|---|---|---|---|---|---|
-| **CNN (current model)** | 96.4% | **97.53%** | **96.9%** | **95.6%** | 99.2% | **98.1%** |
-| EfficientNetB0 | **96.96%** | 96.77% | 95.4% | 94.5% | **99.5%** | 97.0% |
+- **EfficientNetB0** (`--arch efficientnet`): 160×160 input, blocks 6–7 fine-tuned.
+- **ResNet-50** (`--arch resnet50`): 224×224 input (its ImageNet resolution), the last
+  stage (`conv5`) fine-tuned. ResNet-50 has no built-in input scaling, so the model
+  includes a `ResNetPreprocess` layer and still takes raw 0–255 pixels like the others.
 
-**Not adopted.** It's slightly better on validation and slightly worse on test, and
-every gap is a handful of images, i.e. within run-to-run noise — so there's no evidence
-it's better, and the simpler model stays. On a CPU-only laptop with limited free memory
-the experiment ran at 160×160 and fine-tuned only the top blocks; 224×224 input and
-deeper fine-tuning are the obvious next steps.
+| | Input | Parameters | Validation acc. | Test acc. | Test loss | glioma F1 | meningioma F1 | notumor F1 | pituitary F1 |
+|---|---|---|---|---|---|---|---|---|---|
+| **CNN (current model)** | 128 | **1.3 M** | 96.4% | **97.53%** | **0.085** | 96.9% | **95.6%** | 99.2% | **98.1%** |
+| ResNet-50 | 224 | 23.6 M | **98.01%** | 97.06% | 0.134 | **97.1%** | 94.4% | **99.3%** | 96.9% |
+| EfficientNetB0 | 160 | 4.1 M | 96.96% | 96.77% | 0.149 | 95.4% | 94.5% | **99.5%** | 97.0% |
+
+**Neither was adopted.** All three models land within 0.8 points of each other on the
+test set, a gap of about 5–8 images out of 1,054, which is within run-to-run noise. The
+CNN is the smallest (18× fewer parameters than ResNet-50), has the lowest test loss, and
+runs comfortably in the browser, so it stays.
+
+What the comparison shows:
+- **ResNet-50 is best on validation (98.0%) but not on test (97.1%).** Validation
+  accuracy is used to pick its best epoch, so it is slightly optimistic; the test set is
+  the fair score.
+- **ResNet-50's weak spot is meningioma.** It sends 13 of 247 meningiomas to pituitary
+  (meningioma recall 91.9%, versus 96.0% for the CNN), while it is the best of the three
+  on glioma (236 of 243 correct).
+- **Fine-tuning started to overfit.** By the end of ResNet-50's fine-tuning, training
+  accuracy was 99.8% while validation accuracy moved between 92% and 98%. Early stopping
+  ended the run after 21 of 25 epochs and restored the best epoch.
+- **Cost.** On a CPU-only Windows laptop (TensorFlow has no GPU support on native
+  Windows), ResNet-50's fine-tuning took about 6 minutes per epoch, roughly 2 hours in
+  total, compared with 15–20 minutes for the whole CNN training.
+
+The EfficientNet run used 160×160 to fit in memory, below its 224×224 ImageNet
+resolution, so a 224×224 rerun would make the three-way comparison fairer.
 
 ### Grad-CAM heatmaps
 
 The app supports Grad-CAM heatmaps ("where the model looked") on both prediction pages
 and in the API, for models that end in GlobalAveragePooling → Dense — like the
-EfficientNet one. For that head, Grad-CAM equals `feature_map @ dense_weights`, so it
+EfficientNet and ResNet-50 ones. For that head, Grad-CAM equals `feature_map @ dense_weights`, so it
 needs no gradients: the exported ONNX model computes it as a second output (`cam`) and
 the browser draws it. `tests/test_gradcam.py` checks this against a real gradient
 computation (max difference ~2e-7 on the sample images).
 
 **The current CNN doesn't have that head, so no heatmap is shown** on the live site and
-those tests are skipped. Switching to the EfficientNet model would turn heatmaps on.
+those tests are skipped. Switching to one of the transfer-learning models would turn
+heatmaps on.
 
 ## The site and the app
 
@@ -275,7 +297,7 @@ brain-tumor-classifier/
 ├── data/
 │   └── brain_tumor.parquet       # downloaded dataset (gitignored, see below)
 ├── src/
-│   └── train.py                  # loads data, trains (--arch cnn|efficientnet), saves everything
+│   └── train.py                  # loads data, trains (--arch cnn|efficientnet|resnet50), saves everything
 ├── model/
 │   ├── brain_tumor_cnn.keras     # trained model
 │   ├── brain_tumor_cnn.onnx      # same model for the browser (written by train.py)
@@ -347,10 +369,14 @@ python src/train.py --arch efficientnet --out build/experiments/effnet
 #   experiment: writes to the --out folder, never touches model/ or the site
 python src/train.py --arch efficientnet --out build/experiments/effnet --resume 11 --batch-size 16
 #   continue an interrupted run from its best checkpoint, with less memory
+python src/train.py --arch resnet50 --out build/experiments/resnet50
+#   ResNet-50 experiment at 224x224 (--resume works the same way)
 ```
 
-EfficientNet needs a few GB of free RAM; on a machine where memory runs out, use
-`--batch-size 16` and close other heavy apps.
+EfficientNet and ResNet-50 need a few GB of free RAM; on a machine where memory runs out,
+use `--batch-size 16` and close other heavy apps. ResNet-50 is the slowest: about 2 hours
+on a CPU. Always pass `--out` for experiments; without it, the script writes to `model/`
+and replaces the deployed CNN.
 
 ### Tests and checks
 
@@ -482,16 +508,16 @@ must pass before merging. Direct pushes and force-pushes to `main` are blocked.
   may be source-specific visual artifacts the model partly keys off instead of purely
   tumor morphology.
 - CPU-only training on 128×128 images trades off some resolution/detail for speed.
-  Transfer learning (EfficientNetB0 at 160×160, top blocks fine-tuned) did not improve
-  on it, including on meningioma; see the
-  [experiment](#transfer-learning-experiment-efficientnetb0).
+  Transfer learning (EfficientNetB0 at 160×160 and ResNet-50 at 224×224, top layers
+  fine-tuned) did not improve on it, including on meningioma; see the
+  [experiments](#transfer-learning-experiments-efficientnetb0-and-resnet-50).
 - A single train/val/test split: differences of a few tenths of a percent between runs
   or models are within noise.
 
 ## Possible improvements
 
-- Transfer learning at full resolution (224×224) with deeper fine-tuning, given more
-  memory or a GPU
+- EfficientNetB0 at its full 224×224 resolution, and deeper fine-tuning of both
+  pretrained models, given more memory or a GPU
 - k-fold cross-validation instead of a single train/val/test split, to tell real
   improvements from noise
 - Cross-dataset validation: train on some of the three source datasets, test on another
