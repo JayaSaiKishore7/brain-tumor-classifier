@@ -7,12 +7,19 @@ Trains a classifier for brain MRI scans: glioma, meningioma, no tumor, pituitary
                                                 # experiment: write everything elsewhere
     python src/train.py --arch efficientnet --out build/exp/effnet --resume 11 --batch-size 16
                                                 # continue an interrupted run, less memory
+    python src/train.py --arch resnet50 --out build/exp/resnet50
+                                                # ResNet-50 experiment (--resume works too)
 
 Architectures:
   efficientnet  EfficientNetB0 pretrained on ImageNet (transfer learning), 160x160 input,
                 head = GlobalAveragePooling -> Dropout -> Dense. That head makes Grad-CAM
                 exact and forward-only (see scripts/export_onnx.py), so heatmaps also
                 work in the browser.
+  resnet50      ResNet-50 pretrained on ImageNet (transfer learning, experiment only),
+                224x224 input, same head and same 2-phase training as efficientnet.
+                ResNet-50 has no built-in input scaling, so the model starts with a
+                ResNetPreprocess layer; it still takes raw 0-255 pixels like the others.
+                Loading a saved resnet50 model needs that layer, i.e. `import train`.
   cnn           4-block CNN trained from scratch, 128x128 input. The default and the
                 deployed model.
 
@@ -59,7 +66,7 @@ MODEL_FILE = "brain_tumor_cnn.keras"
 # The CNN is the adopted model (see the README's transfer-learning experiment), so a plain
 # `python src/train.py` retrains it; EfficientNet is opt-in with --arch efficientnet.
 DEFAULT_ARCH = "cnn"
-IMG_SIZES = {"efficientnet": 160, "cnn": 128}
+IMG_SIZES = {"efficientnet": 160, "resnet50": 224, "cnn": 128}
 SEED = 42
 BATCH_SIZE = 32  # --batch-size
 
@@ -165,9 +172,56 @@ def build_efficientnet(num_classes, img_size):
     return model
 
 
-def unfreeze_top(model, first_block="block6a"):
+@tf.keras.utils.register_keras_serializable(package="brain_tumor")
+class ResNetPreprocess(layers.Layer):
+    """Runs resnet50.preprocess_input inside the model: RGB -> BGR, then subtract the
+    ImageNet mean per channel (no division). That is the input ResNet-50's ImageNet
+    weights expect. A named, registered layer (not a Lambda) so the model can be saved
+    and loaded again (ModelCheckpoint, --resume) without Keras's unsafe-Lambda error."""
+
+    def call(self, x):
+        # Cast first: uint8 pixels minus a float mean would fail or wrap around.
+        x = tf.cast(x, self.compute_dtype)
+        return tf.keras.applications.resnet50.preprocess_input(x)
+
+
+def build_resnet50(num_classes, img_size):
+    """ResNet-50 backbone (ImageNet weights, frozen at first) + the same head as
+    build_efficientnet. Takes raw 0-255 pixels; ResNetPreprocess does the scaling."""
+    backbone = tf.keras.applications.ResNet50(
+        include_top=False, weights="imagenet", input_shape=(img_size, img_size, 3)
+    )
+    backbone.trainable = False
+    inputs = layers.Input(shape=(img_size, img_size, 3), name="image")
+    x = inputs
+    for layer in augmentation():
+        x = layer(x)
+    # Preprocess after augmentation: RandomBrightness works on 0-255 values.
+    x = ResNetPreprocess(name="preprocess")(x)
+    x = backbone(x, training=False)  # BatchNorm frozen, as in build_efficientnet
+    x = layers.GlobalAveragePooling2D(name="gap")(x)
+    x = layers.Dropout(0.3)(x)
+    outputs = layers.Dense(num_classes, activation="softmax", name="classifier")(x)
+    model = models.Model(inputs, outputs, name="resnet50_mri")
+    compile_model(model, 1e-3)
+    return model
+
+
+# Per transfer-learning architecture: how to build it, the backbone's layer name inside
+# the model, and the first block that gets unfrozen for fine-tuning.
+TRANSFER = {
+    "efficientnet": {
+        "build": build_efficientnet,
+        "backbone": "efficientnetb0",
+        "first_block": "block6a",
+    },
+    "resnet50": {"build": build_resnet50, "backbone": "resnet50", "first_block": "conv5_block1"},
+}
+
+
+def unfreeze_top(model, backbone_name="efficientnetb0", first_block="block6a"):
     """Fine-tuning phase: make the backbone's top blocks trainable (BatchNorm stays frozen)."""
-    backbone = model.get_layer("efficientnetb0")
+    backbone = model.get_layer(backbone_name)
     backbone.trainable = True
     trainable = False
     for layer in backbone.layers:
@@ -219,18 +273,30 @@ def fit(model, data, epochs, patience, checkpoint_path, run, initial_best=None):
     ).history
 
 
-def train_head_on_cached_features(model, data, num_classes, epochs=40):
+def train_head_on_cached_features(
+    model, data, num_classes, backbone_name="efficientnetb0", epochs=40
+):
     """Phase 1, fast path: while the backbone is frozen its pooled features never change,
     so compute them once and train the same Dropout -> Dense head on them (seconds per
     epoch instead of minutes). No augmentation in this phase; fine-tuning uses it.
     The trained head weights are copied into the full model's "classifier" layer."""
     x_train, y_train, x_val, y_val = data
-    backbone = model.get_layer("efficientnetb0")
+    backbone = model.get_layer(backbone_name)
     gap = layers.GlobalAveragePooling2D()
+    # The backbone alone skips any preprocessing layer that sits in front of it in the
+    # model (ResNet-50 has one, EfficientNet doesn't), so apply that here as well.
+    layer_names = {layer.name for layer in model.layers}
+    if "preprocess" in layer_names:
+        preprocess = model.get_layer("preprocess")
+    else:
+        preprocess = lambda x: x
 
     def features(x):
         return np.concatenate(
-            [gap(backbone(x[i : i + 64], training=False)).numpy() for i in range(0, len(x), 64)]
+            [
+                gap(backbone(preprocess(x[i : i + 64]), training=False)).numpy()
+                for i in range(0, len(x), 64)
+            ]
         )
 
     print("  computing backbone features once...")
@@ -273,15 +339,17 @@ def train(arch, num_classes, img_size, data, checkpoint_path, history_path):
         fit(model, data, 35, 8, checkpoint_path, run)
         return model, run["history"], None
 
-    model = build_efficientnet(num_classes, img_size)
+    # efficientnet and resnet50: the same 2-phase transfer-learning flow.
+    cfg = TRANSFER[arch]
+    model = cfg["build"](num_classes, img_size)
     model.summary()
     print("Phase 1: train the head on the frozen pretrained backbone")
-    history = train_head_on_cached_features(model, data, num_classes)
+    history = train_head_on_cached_features(model, data, num_classes, cfg["backbone"])
     boundary = len(history["loss"])
     save_history_json(history, boundary, history_path)
     phase1_best, phase1_weights = max(history["val_accuracy"]), model.get_weights()
     print("Phase 2: fine-tune the top of the backbone")
-    unfreeze_top(model)
+    unfreeze_top(model, cfg["backbone"], cfg["first_block"])
     run = {"history": history, "boundary": boundary, "path": history_path}
     fine = fit(model, data, 25, 6, checkpoint_path, run)
     if max(fine["val_accuracy"]) < phase1_best:
@@ -290,16 +358,18 @@ def train(arch, num_classes, img_size, data, checkpoint_path, history_path):
     return model, history, boundary
 
 
-def resume(data, checkpoint_path, history_path, epochs):
-    """Continue an interrupted EfficientNet fine-tuning run from its best checkpoint.
+def resume(arch, data, checkpoint_path, history_path, epochs):
+    """Continue an interrupted EfficientNet or ResNet-50 fine-tuning run from its best
+    checkpoint.
 
     Only an epoch that beats the checkpoint's validation accuracy replaces it; if none
     does, the checkpoint itself is the result."""
+    cfg = TRANSFER[arch]
     model = tf.keras.models.load_model(checkpoint_path)
     with open(history_path) as f:
         saved = json.load(f)
     history, boundary = saved["history"], saved["boundary"]
-    unfreeze_top(model)
+    unfreeze_top(model, cfg["backbone"], cfg["first_block"])
     best = val_accuracy(model, data)
     print(f"Resuming fine-tuning from {checkpoint_path}: val accuracy {best:.4f}")
     run = {"history": history, "boundary": boundary, "path": history_path}
@@ -391,7 +461,7 @@ def main():
         "--resume",
         type=int,
         metavar="EPOCHS",
-        help="continue an interrupted efficientnet fine-tuning run (same --out) "
+        help="continue an interrupted efficientnet/resnet50 fine-tuning run (same --out) "
         "from its best checkpoint, for up to EPOCHS more epochs",
     )
     parser.add_argument(
@@ -429,9 +499,9 @@ def main():
     history_path = os.path.join(model_dir, "history.json")
     data = (x_train, y_train, x_val, y_val)
     if args.resume:
-        if args.arch != "efficientnet":
-            sys.exit("--resume is only for efficientnet fine-tuning runs.")
-        model, history, boundary = resume(data, model_path, history_path, args.resume)
+        if args.arch not in TRANSFER:
+            sys.exit("--resume is only for efficientnet/resnet50 fine-tuning runs.")
+        model, history, boundary = resume(args.arch, data, model_path, history_path, args.resume)
     else:
         model, history, boundary = train(
             args.arch, len(class_names), img_size, data, model_path, history_path
